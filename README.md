@@ -21,5 +21,7 @@ The retail locations are derived using a number of datasets:
 - SafeGraph Retail Places Building Geometries - *polygons*
 - OSM Retail Land-Use - *polygons*
 
-All the necessary functions can be found in (Helper Functions.R)[Helper Functions.R].
+All the necessary functions can be found in [Helper Functions.R](Source Code/Helper Functions.R), and you can follow this workflow to obtain a clustering with similar datasets:
+
+- 
 
