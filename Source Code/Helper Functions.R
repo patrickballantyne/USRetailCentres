@@ -290,6 +290,9 @@ get_urban_features <- function(state = "AL") {
 ## using the original points and buildings datasets to define minimum parameters for a retail centre
 get_h3_clusters <- function(retail_features, h3_resolution = 11, krings = 1, min_pts = 10, boundary = FALSE, identifier = "IL") {
   
+  ## Start time
+  ptm <- proc.time()
+  
   ## 1. Compile a list of h3 addresses for points and polygons ##############################
   h3_list <- retail_features
   h3_list <- h3_list %>%
@@ -586,7 +589,9 @@ get_h3_clusters <- function(retail_features, h3_resolution = 11, krings = 1, min
   ## Boundary or not
   if (boundary == TRUE) {
     print("STAGE FIVE COMPLETE - RETAIL CENTRE HEXAGONS RETURNED")
+    proc.time() - ptm
     return(rcb_m)
+    
     
   } else if (boundary == FALSE) {
     
@@ -599,6 +604,7 @@ get_h3_clusters <- function(retail_features, h3_resolution = 11, krings = 1, min
       select(rcID, tractID, n.pts, geometry) %>%
       arrange(rcID)
     print("STAGE FIVE COMPLETE - RETAIL CENTRE BOUNDARIES RETURNED")
+    proc.time() - ptm
     return(rf_cl)
     
     
