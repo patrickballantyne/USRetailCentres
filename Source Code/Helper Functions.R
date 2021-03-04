@@ -554,95 +554,54 @@ get_h3_clusters <- function(retail_features, h3_resolution = 11, krings = 1, min
     select(tractID, n.pts, geometry) %>%
     filter(n.pts >= min_pts)
   print("STAGE FOUR COMPLETE - FINAL TRACTS PROCESSED")
-  return(retail_centre_hexes)
   
   ####################################################################################
   
-  ## 6. Tidying Output
+  ## 6. Tidying Output - better retail centre ID's, consistency and option to return individual H3's or boundary
   
-  ### Tidy up the result
-  rc <- tidy_clusters(retail_centre_hexes, pts = pts, bdgs = bdgs, identifier = identifier)
+  ## Extracting boundary of tracts
+  rcb <- retail_centre_hexes %>%
+    select(tractID) %>%
+    group_by(tractID) %>%
+    summarise()
+  
+  ## Data to merge onto boundary
+  rf_cl_temp <- retail_centre_hexes %>%
+    as.data.frame() %>%
+    select(tractID, n.pts) %>%
+    unique()
+  
+  ## Merge to get data for each retail centre boundary
+  rcb_m <- merge(rcb, rf_cl_temp, by = "tractID")
+  
+  ## Assign new IDs based on identifier and hierarchy (n.pts)
+  rcb_m <- rcb_m %>%
+    arrange(desc(n.pts))
+  rcb_m$ID <- seq.int(nrow(rcb_m))
+  rcb_m$ID <- as.character(with(rcb_m, paste(identifier,rcb_m$ID, sep = "")))
+  rcb_m <- rcb_m %>%
+    select(ID, tractID, n.pts, geometry) %>%
+    rename(rcID = ID)
   
   ## Boundary or not
-  if (boundary == FALSE) {
+  if (boundary == TRUE) {
     print("STAGE FIVE COMPLETE - RETAIL CENTRE HEXAGONS RETURNED")
-    return(rc)
+    return(rcb_m)
     
-  } else if (boundary == TRUE) {
+  } else if (boundary == FALSE) {
     
-    info <- rc %>%
+    ## Merging New ID's onto individual hexagons
+    cl_info <- rcb_m %>%
       as.data.frame() %>%
-      select(rcID, n.pts, n.bdgs) %>%
-      unique()
-    rc_d <- Lslide::st_dissolve(rc, by = "rcID")
-    rc_d <- merge(rc_d, info, by = "rcID", all.x = TRUE)
+      select(rcID, tractID)
+    rf_cl <- merge(retail_centre_hexes, cl_info, by = "tractID", all.x = TRUE)
+    rf_cl <- rf_cl %>%
+      select(rcID, tractID, n.pts, geometry) %>%
+      arrange(rcID)
     print("STAGE FIVE COMPLETE - RETAIL CENTRE BOUNDARIES RETURNED")
-    return(rc_d)
+    return(rf_cl)
     
     
   }
-}
-
-
-## Function that tidies the output clusters from the get_h3_clusters() function
-tidy_clusters <- function(cl, pts, bdgs, h3_res = 11, identifier = "IL") {
-  
-  # 1. Polyfill cluster boundaries to get full extent and H3 geoms
-  ## Convert hexes to centroids
-  c <- st_centroid(cl)
-  ## Build concave hulls for each tractID
-  c_hulls <- map(unique(c$tractID), 
-                 ~ concaveman(c[c$tractID %in% .,])
-  ) %>%
-    map2(unique(c$tractID), ~ mutate(.x, tractID = .y)) %>%
-    reduce(rbind)
-  c_hulls <- st_make_valid(c_hulls)
-  c_hulls <- st_transform(c_hulls, 4326)
-  ## Polyfill
-  c_h3 <- polyfill(c_hulls, h3_res, simple = FALSE)
-  c_h3 <- h3_to_polygon(unlist(c_h3$h3_polyfillers), simple = FALSE)
-  c_h3 <- c_h3 %>%
-    select(h3_address)
-  
-  # 2. Reattach and reformat cluster info
-  c_h3 <- st_join(c_h3, c_hulls)
-  
-  pts_cl <- st_intersection(pts, c_h3)
-  pts_cl <- pts_cl %>%
-    as.data.frame() %>%
-    select(tractID) %>%
-    group_by(tractID) %>%
-    add_count() %>%
-    unique()
-  
-  # bdgs_cl <- st_intersection(bdgs, c_h3)
-  # bdgs_cl <- bdgs_cl %>%
-  #   as.data.frame() %>%
-  #   select(tractID) %>%
-  #   group_by(tractID) %>%
-  #   add_count() %>%
-  #   unique()
-  
-  c_h3 <- merge(c_h3, pts_cl, by = "tractID", all.x = TRUE)
-  # c_h3 <- merge(c_h3, bdgs_cl, by = "tractID", all.x = TRUE)
-  c_h3 <- c_h3 %>% rename(n.pts = n) %>% arrange(desc(n.pts))
-  
-  c_h3_d <- c_h3 %>%
-    as.data.frame() %>%
-    select(tractID, n.bdgs, n.pts) %>%
-    unique() 
-  c_h3_d$ID <- seq.int(nrow(c_h3_d))
-  c_h3_d$ID <- as.character(with(c_h3_d, paste("RI", c_h3_d$ID, sep = "")))
-  
-  
-  c_h3 <- merge(c_h3, c_h3_d, by = "tractID", all.x = TRUE)
-  c_h3 <- c_h3 %>%
-    select(-c(tractID, n.pts.x, n.bdgs.x)) %>%
-    rename(rcID = ID, n.pts = n.pts.y, n.bdgs = n.bdgs.y) %>%
-    arrange(rcID) %>%
-    select(rcID, n.pts, n.bdgs, h3_address, geometry)
-  c_h3 <- st_as_sf(c_h3)
-  return(c_h3)
-  
 }
 
