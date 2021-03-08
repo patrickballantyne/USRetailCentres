@@ -1,2 +1,35 @@
 # USRetailCentres
-Centres, Characteristics and Catchments of American Retail Centre Agglomerations
+
+## American Retail Centre Geographies: Clusters, Characteristics and Catchments 
+
+This repo contains all the code used for Paper Two of my PhD. In this paper, using data from SafeGraph, OSM and USGS we develop a comprehensive classification of retail centre space for the national extent of the US. The paper has three sections/aims:
+
+1. Delineation of Retail Centre Extents
+2. Constructing a Typology of Retail Centres
+3. Building Catchments for the Retail Centres
+
+
+---
+
+### Part One - Delineation of Retail Centre Extents 
+
+To delineate the extents of American Retail Centres, we use a methodology that is based on the hexagonal spatial indexing system; H3. In essense the methodology aggregates retail locations to hexagons, and then using graph objects we are able to delineate contiguous tracts of Retail locations based on how they interact with other hexagons in the dataset.
+
+The retail locations are derived using a number of datasets:
+
+- SafeGraph Retail Places - *points*
+- SafeGraph Retail Places Building Geometries - *polygons*
+- OSM Retail Land-Use - *polygons*
+
+All the necessary functions can be found in [Helper Functions.R](Source Code/Helper Functions.R), and you can follow this workflow to obtain a clustering with similar datasets:
+
+- Assemble OSM retail landuse polygons - using the 'bb.list()' and 'get_osm_polygons()' functions.
+- Convert all your retail locations datasets to H3 - using either the 'extract_state_h3()' function, or to assemble them individually you can use the 'points2hr()', 'lines2h3()', 'poly2h3()' and 'buildings2h3()' functions.
+- Download the urban features (rails, roads, water) that you want to act as delimiters for your retail centre boundaries, and assemble them for the clustering using the 'get_urban_features()' function.
+- Run the delineation - using the 'get_h3_clusters()' function, selecting the h3 resolution you want to use, the minimum number of points in a centre, the no. of krings and whether or not you want the boundary or individual hexagons returned.
+
+
+---
+
+
+
