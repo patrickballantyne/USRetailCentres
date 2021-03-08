@@ -272,15 +272,15 @@ get_water <- function(state = "AL") {
 get_urban_features <- function(state = "AL") {
   
   ## Get Roads
-  rds <- get_roads(state)
-  print("ROADS PROCESSED")
+  # rds <- get_roads(state)
+  # print("ROADS PROCESSED")
   ## Get Water
   wtr <- get_water(state)
   print("WATER PROCESSED")
   ## Join 
-  print("JOINING AND DISSOLVING")
-  uf <- rbind(rds, wtr)
-  return(uf)
+  # print("JOINING AND DISSOLVING")
+  # uf <- rbind(rds, wtr)
+  return(wtr)
 }
 
 
@@ -301,7 +301,7 @@ get_h3_clusters <- function(retail_features, h3_resolution = 11, krings = 1, min
   
   ###########################################################################################
   
-  ## 2. Do the first round of tracts ########################################################
+  ## 1. Do the first round of tracts ########################################################
   if(krings == 1) {
     hex_graph <- as_tibble(do.call(rbind, lapply(as.list(h3_list$h3_address), function(x) get_kring(x, krings)))) 
     hex_graph <- hex_graph %>%
@@ -376,7 +376,7 @@ get_h3_clusters <- function(retail_features, h3_resolution = 11, krings = 1, min
   
   #############################################################################################
   
-  # 3. Grab the connecting hexagons ###########################################################
+  # 2. Grab the connecting hexagons ###########################################################
   
   ## Grab neighbouring hexagons again
   hex_connector <- as_tibble(do.call(rbind, lapply(as.list(igraph_clusters$h3_address), function(x) get_kring(x, krings))))
@@ -441,7 +441,7 @@ get_h3_clusters <- function(retail_features, h3_resolution = 11, krings = 1, min
   
   #####################################################################################
   
-  # 4. Re-run first step to get final set of tracts
+  # 3. Re-run first step to get final set of tracts
   
   igraph_clusters <- out %>%
     select(h3_address)
@@ -506,14 +506,13 @@ get_h3_clusters <- function(retail_features, h3_resolution = 11, krings = 1, min
   
   ##################################################################################
   
-  ## 5. Additional Parameters - Boundaries, Min_Pts ################################
+  ## 4. Additional Parameters - Boundaries, Min_Pts ################################
   
   ## Extract boundaries for tracts 
   retail_centre_boundaries <- hexes %>%
     select(tractID) %>%
     group_by(tractID) %>%
-    summarize() #%>%
-    #smoothr::fill_holes(threshold = units::set_units(2000, km^2))
+    summarise()
   
   ## Read in points
   pts <- read_points(state = identifier)
@@ -530,84 +529,59 @@ get_h3_clusters <- function(retail_features, h3_resolution = 11, krings = 1, min
     select(tractID, n) %>%
     rename(n.pts = n) %>%
     unique() 
-  merge <- merge(retail_centre_boundaries, pts_cl, by = "tractID", all.x = TRUE)
+  boundaries <- merge(retail_centre_boundaries, pts_cl, by = "tractID", all.x = TRUE)
   
-  # ## Get count of buildings in each rc
-  # bdg_cl <- st_intersection(bdgs, retail_centre_boundaries)
-  # bdg_cl <- bdg_cl %>%
-  #   as.data.frame() %>%
-  #   select(safegraph_place_id, tractID) %>%
-  #   unique() %>%
-  #   group_by(tractID) %>%
-  #   add_count() %>%
-  #   select(tractID, n) %>%
-  #   rename(n.bdgs = n) %>%
-  #   unique()
-  # 
-  # merge2 <- merge(merge1, bdg_cl, by = "tractID", all.x = TRUE)
-  # merge2 <- merge2 %>%
-  #   replace(is.na(.), 0)
-  
-  retail_centre_hexes <- poly2h3(retail_centre_boundaries, 11)
-  retail_centre_hexes <- h3_to_polygon(retail_centre_hexes)
-  retail_centre_hexes <- st_as_sf(retail_centre_hexes)
-  retail_centre_hexes <- st_intersection(retail_centre_hexes, merge)
-  retail_centre_hexes <- retail_centre_hexes %>%
-    rename(geometry = x) %>%
-    select(tractID, n.pts, geometry) %>%
-    filter(n.pts >= min_pts)
-  print("STAGE FOUR COMPLETE - FINAL TRACTS PROCESSED")
-  
-  ####################################################################################
-  
-  ## 6. Tidying Output - better retail centre ID's, consistency and option to return individual H3's or boundary
-  
-  ## Extracting boundary of tracts
-  rcb <- retail_centre_hexes %>%
-    select(tractID) %>%
-    group_by(tractID) %>%
-    summarise()
-  
-  ## Data to merge onto boundary
-  rf_cl_temp <- retail_centre_hexes %>%
+  ## Get df version to merge onto individual hexes
+  boundaries_df <- boundaries %>%
     as.data.frame() %>%
-    select(tractID, n.pts) %>%
-    unique()
+    select(tractID, n.pts)
   
-  ## Merge to get data for each retail centre boundary
-  rcb_m <- merge(rcb, rf_cl_temp, by = "tractID")
-  
+  ## Merge on pt counts
+  hexes <- merge(hexes, boundaries_df, by = "tractID", all.x = TRUE)
+
   ## Assign new IDs based on identifier and hierarchy (n.pts)
-  rcb_m <- rcb_m %>%
+  rcb_m <- boundaries %>%
     arrange(desc(n.pts))
   rcb_m$ID <- seq.int(nrow(rcb_m))
   rcb_m$ID <- as.character(with(rcb_m, paste(identifier,rcb_m$ID, sep = "")))
-  rcb_m <- rcb_m %>%
+  out_boundaries <- rcb_m %>%
     select(ID, tractID, n.pts, geometry) %>%
     rename(rcID = ID)
   
-  ## Boundary or not
-  if (boundary == TRUE) {
-    print("STAGE FIVE COMPLETE - RETAIL CENTRE HEXAGONS RETURNED")
-    proc.time() - ptm
-    return(rcb_m)
-    
-    
-  } else if (boundary == FALSE) {
-    
-    ## Merging New ID's onto individual hexagons
-    cl_info <- rcb_m %>%
-      as.data.frame() %>%
-      select(rcID, tractID)
-    rf_cl <- merge(retail_centre_hexes, cl_info, by = "tractID", all.x = TRUE)
-    rf_cl <- rf_cl %>%
-      select(rcID, tractID, n.pts, geometry) %>%
-      arrange(rcID)
-    print("STAGE FIVE COMPLETE - RETAIL CENTRE BOUNDARIES RETURNED")
-    proc.time() - ptm
-    return(rf_cl)
-    
-    
-  }
+  cl_info <- out_boundaries %>%
+    as.data.frame() %>%
+    select(rcID, tractID)
+  rf_cl <- merge(hexes, cl_info, by = "tractID", all.x = TRUE)
+  out_hexes <- rf_cl %>%
+    select(rcID, tractID, n.pts, geometry) %>%
+    arrange(rcID)
+  
+  ## Create list
+  ls <- list(out_boundaries, out_hexes)
+  return(ls)
+  
 }
+
+
+# ## Boundary or not
+# if (boundary == TRUE) {
+#   print("STAGE FOUR COMPLETE - RETAIL CENTRES (INDIVIDUAL HEXAGONS) RETURNED")
+#   return(rcb_m)
+#   
+#   
+# } else if (boundary == FALSE) {
+#   
+#   ## Merging New ID's onto individual hexagons
+#   cl_info <- rcb_m %>%
+#     as.data.frame() %>%
+#     select(rcID, tractID)
+#   rf_cl <- merge(hexes, cl_info, by = "tractID", all.x = TRUE)
+#   rf_cl <- rf_cl %>%
+#     select(rcID, tractID, n.pts, geometry) %>%
+#     arrange(rcID)
+#   print("STAGE FIVE COMPLETE - RETAIL CENTRES (BOUNDARIES) RETURNED")
+#   return(rf_cl)
+#   
+#   
+# }
 
