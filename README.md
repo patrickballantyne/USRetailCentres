@@ -21,14 +21,14 @@ The retail locations are derived using a number of datasets:
 - SafeGraph Retail Places Building Geometries - *polygons*
 - OSM Retail Land-Use - *polygons*
 
-All the necessary functions can be found in [Helper Functions - Delineation.R](Source Code/Helper Functions - Delineation.R), and you can follow this workflow to obtain a clustering with similar datasets:
+All the necessary functions can be found [HERE](Source Code/Helper Functions - Delineation.R), and you can follow this workflow to obtain a clustering with similar datasets:
 
 - Assemble OSM retail landuse polygons - using the 'bb.list()' and 'get_osm_polygons()' functions.
 - Convert all your retail locations datasets to H3 - using either the 'extract_state_h3()' function, or to assemble them individually you can use the 'points2hr()', 'lines2h3()', 'poly2h3()' and 'buildings2h3()' functions.
 - Download the urban features (rails, roads, water) that you want to act as delimiters for your retail centre boundaries, and assemble them for the clustering using the 'get_urban_features()' function.
 - Run the delineation - using the 'get_h3_clusters()' function, selecting the h3 resolution you want to use, the minimum number of points in a centre, the no. of krings and whether or not you want the boundary or individual hexagons returned.
 
-For improved performance - particularly useful with larger states (CA, NJ, NY), there is also a set of the same functions written to utilise parallelisation, for improved performance. These can be found in [Helper Functions - Delineation (Parallel).R](Source Code/Helper Functions - Delineation (Parallel).R)
+For improved performance - particularly useful with larger states (CA, NJ, NY), there is also a set of the same functions written to utilise parallelisation, for improved performance. These can be found in [HERE](Source Code/Helper Functions - Delineation (Parallel).R)
 
 
 ---
