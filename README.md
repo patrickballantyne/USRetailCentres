@@ -33,5 +33,11 @@ For improved performance - particularly useful with larger states (CA, NJ, NY), 
 
 ---
 
+## Part Two - A Typology of American Retail 
+
+---
+
+## Part Three - Retail Centre Catchments
+
 
 
