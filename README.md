@@ -28,7 +28,7 @@ All the necessary functions can be found [HERE](https://github.com/patrickballan
 - Download the urban features (rails, roads, water) that you want to act as delimiters for your retail centre boundaries, and assemble them for the clustering using the 'get_urban_features()' function.
 - Run the delineation - using the 'get_h3_clusters()' function, selecting the h3 resolution you want to use, the minimum number of points in a centre, the no. of krings and whether or not you want the boundary or individual hexagons returned.
 
-For improved performance - particularly useful with larger states (CA, NJ, NY), there is also a set of the same functions written to utilise parallelisation, for improved performance. These can be found in [HERE](Source Code/Helper Functions - Delineation (Parallel).R)
+For improved performance - particularly useful with larger states (CA, NJ, NY), there is also a set of the same functions written to utilise parallelisation, for improved performance. These can be found in [HERE](https://github.com/patrickballantyne/USRetailCentres/blob/main/Source%20Code/Helper%20Functions%20-%20Delineation%20(Parallel).R)
 
 
 ---
