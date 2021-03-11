@@ -21,7 +21,7 @@ The retail locations are derived using a number of datasets:
 - SafeGraph Retail Places Building Geometries - *polygons*
 - OSM Retail Land-Use - *polygons*
 
-All the necessary functions can be found [HERE](Source Code/Helper Functions - Delineation.R), and you can follow this workflow to obtain a clustering with similar datasets:
+All the necessary functions can be found [HERE](https://github.com/patrickballantyne/USRetailCentres/blob/main/Source%20Code/Helper%20Functions%20-%20Delineation.R), and you can follow this workflow to obtain a clustering with similar datasets:
 
 - Assemble OSM retail landuse polygons - using the 'bb.list()' and 'get_osm_polygons()' functions.
 - Convert all your retail locations datasets to H3 - using either the 'extract_state_h3()' function, or to assemble them individually you can use the 'points2hr()', 'lines2h3()', 'poly2h3()' and 'buildings2h3()' functions.
