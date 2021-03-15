@@ -173,8 +173,8 @@ get_silhouette_scores <- function(db, seed = 123) {
   db_cl <- cbind(db, cl_out)
   
   ## Computation of silhouette scores
-  col_ls <- c(18:26)
-  ss <- lapply(col_ls, function(x) silhouette(db_cl[, x], dist(db_cl[, 3:15])))
+  col_ls <- c(12:20)
+  ss <- lapply(col_ls, function(x) silhouette(db_cl[, x], dist(db_cl[, 1:11])))
   
   ## Computation of average silhouette scores
   avg_ss <- lapply(ss, function(x) mean(x[, 3]))
