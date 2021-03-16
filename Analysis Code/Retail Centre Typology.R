@@ -21,7 +21,7 @@ typ <- typ %>% select(-c("X"))
 
 ## Select variables - remove multicollinear ones (n.hexes, pct_Chain)
 typ <- typ %>%
-  select(n.units, pct_Comparison, pct_Convenience, pct_Service, pct_Leisure, pct_Chain, sub_category_diversity,
+  select(n.units, pct_Comparison, pct_Convenience, pct_Service, pct_Leisure, pct_Independent, pct_Chain, sub_category_diversity,
          roeck, total_visits, median_distance, median_dwell)
 
 ## Scale
@@ -31,13 +31,17 @@ typ_sub <- typ_s[1:100,]
 # 2. Selecting K Value ----------------------------------------------------
 
 ## Calculate Average Silhouette Scores
-get_silhouette_scores(typ_s, 123)
+get_silhouette_scores(typ_sub, 125)
 
-## Elbow Plot
-fviz_nbclust(typ_s, cluster::pam, method = "wss", k.max = 10)
+## Clustergram
+fviz_nbclust(typ_sub, cluster::pam, method = "wss") +
+  labs(subtitle = "Elbow Method")
 
 
 # 3. Running the Clustering -----------------------------------------------
-pm <- run_typology(typ_s, 3)
+pm <- run_typology(typ_sub, 5)
 
-pm[[2]]
+# 4. Examining Cluster Profiles -------------------------------------------
+
+## Plot medoids
+plot_medoids(pm)
