@@ -39,19 +39,44 @@ prep4typology <- function(state) {
   boundaries <- st_read(paste0("Output Data/Retail Centres/", state, "_RC_Boundaries.gpkg"))
   hexes <- st_read(paste0("Output Data/Retail Centres/", state, "_RC_Hexes.gpkg"))
   pts <- read_points(state = state)
+  bdgs <- st_read(paste0("Output Data/Buildings/", state, "_Retail_Buildings.gpkg"))
   
   ## Drop out the retail centres with < 20 pts
   boundaries <- boundaries %>% filter(n.pts >= 20)
   hexes <- hexes %>% filter(rcID %in% boundaries$rcID)
   
-  ## 1. n.units and n.hexes ########################
+  ## 1. n.features & area ########################
   boundaries <- boundaries %>%
     dplyr::rename(n.units = n.pts)
+  
+  ## Count number of H3 hexes
   hex_count <- st_intersection(boundaries, hexes)
   rc_grouped <- hex_count %>%
     as.data.frame() %>%
     group_by(rcID, rcName, n.units) %>%
     dplyr::summarise(n.hexes = n())
+  
+  ## Count number of Buildings
+  bdg_count <- boundaries %>%
+    st_join(bdgs) %>%
+    as.data.frame() %>%
+    select(rcID, rcName) %>%
+    group_by(rcID, rcName) %>%
+    dplyr::summarise(n.bdgs = n())
+  rc_grouped <- merge(rc_grouped, bdg_count, by = c("rcID", "rcName"), all.x = TRUE)
+  
+  ## Calculate Area
+  boundaries$area <- st_area(boundaries)
+  
+  ## Calculate Retail Building Density
+  densities <- merge(boundaries, bdg_count, by = c("rcID", "rcName"), all.x = TRUE)
+  densities <- densities %>%
+    as.data.frame() %>%
+    select(rcID, rcName, n.bdgs, area) %>%
+    mutate(bdg_density = n.bdgs/area) %>%
+    select(-c(n.bdgs)) %>%
+    mutate_at(vars(area, bdg_density), as.numeric)
+  rc_grouped <- merge(rc_grouped, densities, by = c("rcID", "rcName"), all.x = TRUE)
   
   ## 2. proportions of comparison, convenience, leisure and service retail ##########################
   pt_count <- st_intersection(boundaries, pts)
@@ -236,7 +261,7 @@ prep4typology <- function(state) {
   # 8. urban morphology -----------------------------------------------------
   
   ## Read in the Smart Location data for the NorthEast
-  sl <- read.csv("Input Data/Smart Location/NorthEast_SL.gpkg")
+  sl <- st_read("Input Data/Smart Location/NorthEast_SL.gpkg")
   
   ## Join data with retail centres
   sl_rc <- st_join(boundaries, sl)

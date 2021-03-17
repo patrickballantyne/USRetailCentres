@@ -5,12 +5,17 @@ library(tidyverse)
 library(factoextra)
 library(fpc)
 library(cluster)
+options(scipen=999)
 source("Source Code/Helper Functions - Typology.R")
-## Get typology variables for list of retail centres
-ne_typ <- lapply(ne, prep4typology)
-ne_typ <- do.call(rbind, ne_typ)
-write.csv(ne_typ, "Output Data/Typology/NE_TYP.csv")
 
+
+me <- prep4typology("ME")
+
+
+## Get typology variables for list of retail centres
+# ne_typ <- lapply(ne, prep4typology)
+# ne_typ <- do.call(rbind, ne_typ)
+# write.csv(ne_typ, "Output Data/Typology/NE_TYP.csv")
 
 # 1. Preparing for Typology -----------------------------------------------
 
@@ -19,18 +24,16 @@ typ <- read.csv("Output Data/Typology/NE_TYP.csv")
 typ <- typ %>% select(-c("X"))
 
 ## Select variables - remove multicollinear ones (n.hexes, pct_Chain)
-typ <- typ %>%
-  select(n.units, pct_Comparison, pct_Convenience, pct_Service, pct_Leisure, pct_Independent, pct_Chain, sub_category_diversity,
-         roeck, total_visits, median_distance, median_dwell)
+typ_f <- me %>%
+  select(-c(rcID, rcName))
 
 ## Scale
-typ_s <- as.data.frame(scale(typ, center = TRUE, scale = TRUE))
-typ_sub <- typ_s[1:100,]
+typ_s <- as.data.frame(scale(typ_f, center = TRUE, scale = TRUE))
 
 # 2. Selecting K Value ----------------------------------------------------
 
 ## Calculate Average Silhouette Scores
-get_silhouette_scores(typ_sub, 125)
+get_silhouette_scores(typ_s, 125)
 
 ## Clustergram
 fviz_nbclust(typ_sub, cluster::pam, method = "wss") +
