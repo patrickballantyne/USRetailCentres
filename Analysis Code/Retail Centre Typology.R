@@ -6,11 +6,10 @@ library(factoextra)
 library(fpc)
 library(cluster)
 source("Source Code/Helper Functions - Typology.R")
-
 ## Get typology variables for list of retail centres
-# ne_typ <- lapply(ne, prep4typology)
-# ne_typ <- do.call(rbind, ne_typ)
-# write.csv(ne_typ, "Output Data/Typology/NE_TYP.csv")
+ne_typ <- lapply(ne, prep4typology)
+ne_typ <- do.call(rbind, ne_typ)
+write.csv(ne_typ, "Output Data/Typology/NE_TYP.csv")
 
 
 # 1. Preparing for Typology -----------------------------------------------
