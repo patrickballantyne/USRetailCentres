@@ -232,7 +232,27 @@ prep4typology <- function(state) {
   ## Merge
   rc_grouped <- merge(rc_grouped, cl_ptns, by = c("rcID", "rcName"), all.x = TRUE)
   
-  ## 8. return ######################
+
+  # 8. urban morphology -----------------------------------------------------
+  
+  ## Read in the Smart Location data for the NorthEast
+  sl <- read.csv("Input Data/Smart Location/NorthEast_SL.gpkg")
+  
+  ## Join data with retail centres
+  sl_rc <- st_join(boundaries, sl)
+  
+  ## Compute variables
+  sl_out <- sl_rc %>%
+    as.data.frame() %>%
+    group_by(rcID, rcName) %>%
+    summarise(Housing_Count = sum(Housing_Count), Median_Residential_Density = median(Residential_Density),
+              Median_Road_Density = median(Road_Density))
+  
+  ## Join 
+  rc_grouped <- merge(rc_grouped, sl_out, by = c("rcID", "rcName"))
+  
+  
+  ## 9. return ######################
   return(rc_grouped)
   
 }
