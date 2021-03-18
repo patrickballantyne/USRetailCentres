@@ -8,27 +8,25 @@ library(cluster)
 options(scipen=999)
 source("Source Code/Helper Functions - Typology.R")
 
-
-me <- prep4typology("ME")
-
-
 ## Get typology variables for list of retail centres
-# ne_typ <- lapply(ne, prep4typology)
-# ne_typ <- do.call(rbind, ne_typ)
-# write.csv(ne_typ, "Output Data/Typology/NE_TYP.csv")
+ne_typ <- lapply(ne, prep4typology)
+# ne_typ_un <- do.call(rbind, ne_typ)
+# st_write(ne_typ_un, "Output Data/Typology/NE_Typ.gpkg")
+
 
 # 1. Preparing for Typology -----------------------------------------------
 
 ## Read in the dataset
-typ <- read.csv("Output Data/Typology/NE_TYP.csv")
-typ <- typ %>% select(-c("X"))
+typ <- st_read("Output Data/Typology/NE_Typ.gpkg")
 
-## Select variables - remove multicollinear ones (n.hexes, pct_Chain)
-typ_f <- me %>%
-  select(-c(rcID, rcName))
+## Prep for PAM - convert to df, remove ID's and select only the variables we want
+typ_df <- typ %>%
+  as.data.frame() %>%
+  select(-c(rcID, rcName, n.hexes, n.bdgs, top_category_diversity, total_visitors, Housing_Count, geom)) %>% 
+  mutate_if(is.integer, as.numeric)
 
 ## Scale
-typ_s <- as.data.frame(scale(typ_f, center = TRUE, scale = TRUE))
+typ_s <- as.data.frame(scale(typ_df, center = TRUE, scale = TRUE))
 
 # 2. Selecting K Value ----------------------------------------------------
 

@@ -121,7 +121,7 @@ prep4typology <- function(state) {
     as.data.frame() %>%
     select(-c(geometry)) %>%
     spread(chain_or_independent, n) %>%
-    select(-c(6)) %>%
+    select("rcID", "rcName", "Independent", "National Chain", "Small Multiple") %>%
     set_names(c("rcID", "rcName", "Independent", "NationalChain", "SmallMultiple")) %>%
     mutate(Independent = replace(Independent, is.na(Independent), 0)) %>%
     mutate(NationalChain = replace(NationalChain, is.na(NationalChain), 0)) %>%
@@ -153,85 +153,83 @@ prep4typology <- function(state) {
   
   ## 6. geodemographics ######################
 
-  ## Build centroids for the centres
-  centroids <- st_centroid(boundaries)
-  centroids <- st_transform(centroids, 32616)
-  
-  ## Build a buffer to extract features from 
-  catchment <- st_buffer(centroids, 1000)
-  catchment <- catchment %>% select(rcID, rcName)
-  
-  ## Read in the Geodemographic/Population dataset
-  gd_pop <- st_read("Input Data/Geodemographics/NE_Geodemographic_Population.gpkg")
-  gd_pop <- gd_pop %>%
-    select(GEOID, US_GeoDemo_Lookup_Spielman_Singleton_Group, Tot_Pop_2019) %>%
-    dplyr::rename(Spielman_Singleton_Group = US_GeoDemo_Lookup_Spielman_Singleton_Group)
-  
-  ## Calculate total pop for each of the Geodemographic categories
-  ne_pop <- gd_pop %>%
-    as.data.frame() %>%
-    select(Spielman_Singleton_Group, Tot_Pop_2019) %>%
-    group_by(Spielman_Singleton_Group) %>%
-    dplyr::summarise(gd_total = sum(Tot_Pop_2019))
-  ne_pop$ne_total <- sum(ne_pop$gd_total)
-  ne_pop$gd_prop <- (ne_pop$gd_total / ne_pop$ne_total) * 100
-  
-  ## Calculation total pop in each of the Retail Centres
-  rc_pop <- catchment %>%
-    st_transform(4326) %>%
-    st_join(gd_pop) %>%
-    as.data.frame() %>%
-    select(rcID, rcName, Tot_Pop_2019) %>%
-    group_by(rcID, rcName) %>%
-    dplyr::summarise(total_rc_pop = sum(Tot_Pop_2019))
- 
-  ## Calculate total population belonging to each geodemographic group, in each retail centre
-  rc_gd <- catchment %>%
-    st_transform(4326) %>%
-    st_join(gd_pop) %>%
-    as.data.frame() %>%
-    select(-c(geom)) %>%
-    group_by(rcID, rcName, Spielman_Singleton_Group) %>%
-    dplyr::summarise(total_gd_pop = sum(Tot_Pop_2019)) %>%
-    spread(Spielman_Singleton_Group, total_gd_pop, fill = 0) 
-  
-  
-  ## Add in any extra columns that may be missing 
-  cols <- c("A: Hispanic & Kids" = NA_real_, "B: Wealthy Nuclear Families" = NA_real_,
-            "C: Middle Income, Single Family Homes" = NA_real_, "D: Native American" = NA_real_,
-            "E: Wealthy Urbanites" = NA_real_, "F: Low Income and Diverse" = NA_real_,
-            "G: Old, Wealthy White" = NA_real_, "H: Low Income, Minority Mix" = NA_real_,
-            "I: African American Adversity" = NA_real_, "J: Residential Institutions, Young People" = NA_real_)
-  col_list <- c("rcID", "rcName", "A: Hispanic & Kids", "B: Wealthy Nuclear Families", "C: Middle Income, Single Family Homes" ,
-                "D: Native American", "E: Wealthy Urbanites", "F: Low Income and Diverse", "G: Old, Wealthy White",
-                "H: Low Income, Minority Mix", "I: African American Adversity", "J: Residential Institutions, Young People")
-  rc_gd<- add_column(rc_gd, !!!cols[setdiff(names(cols), names(rc_gd))])
-  rc_gd <- rc_gd %>%
-    mutate_all(~replace(., is.na(.), 0))
-  rc_gd <- rc_gd[,col_list]
-
-  ## Convert to proportions, and divide by national level proportions
-  rc_gd_pop <- merge(rc_gd, rc_pop, by = c("rcID", "rcName"))
-  colnames(rc_gd_pop) <- c("rcID", "rcName", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "total_rc_pop")
-  rc_gd_pop <- rc_gd_pop %>%
-    group_by(rcID, rcName) %>%
-    mutate(GroupA_prop = (A/total_rc_pop) * 100, GroupB_prop = (B/total_rc_pop) * 100, GroupC_prop = (C/total_rc_pop) * 100,
-           GroupD_prop = (D/total_rc_pop) * 100, GroupE_prop = (E/total_rc_pop) * 100, GroupF_prop = (F/total_rc_pop) * 100, 
-           GroupG_prop = (G/total_rc_pop) * 100, GroupH_prop = (H/total_rc_pop) * 100, GroupI_prop = (I/total_rc_pop) * 100,
-           GroupJ_prop = (J/total_rc_pop) * 100) %>%
-    select(rcID, rcName, GroupA_prop, GroupB_prop, GroupC_prop, GroupD_prop, GroupE_prop, 
-           GroupF_prop,GroupG_prop, GroupH_prop, GroupI_prop, GroupJ_prop) %>%
-    mutate(GroupA_NE_prop = GroupA_prop / 5.62, GroupB_NE_prop = GroupB_prop / 35.6, GroupC_NE_prop = GroupC_prop / 28.7,
-           GroupD_NE_prop = GroupD_prop / 0.0327, GroupE_NE_prop = GroupE_prop / 4.67, GroupF_NE_prop = GroupF_prop / 2.15, 
-           GroupG_NE_prop = GroupG_prop / 3.31, GroupH_NE_prop = GroupH_prop / 15.6, GroupI_NE_prop = GroupI_prop / 1.48, 
-           GroupJ_NE_prop = GroupJ_prop / 2.79) %>%
-    select(rcID, rcName,
-           GroupA_NE_prop, GroupB_NE_prop, GroupC_NE_prop, GroupD_NE_prop,
-           GroupE_NE_prop, GroupF_NE_prop, GroupG_NE_prop, GroupH_NE_prop,
-           GroupI_NE_prop, GroupJ_NE_prop)
-  
-  ## Merge onto main dataset
-  rc_grouped <- merge(rc_grouped, rc_gd_pop, by = c("rcID", "rcName"), all.x = TRUE)
+  # ## Build centroids for the centres
+  # centroids <- st_centroid(boundaries)
+  # centroids <- st_transform(centroids, 32616)
+  # 
+  # ## Build a buffer to extract features from 
+  # catchment <- st_buffer(centroids, 1000)
+  # catchment <- catchment %>% select(rcID, rcName)
+  # 
+  # ## Read in the Geodemographic/Population dataset
+  # gd_pop <- st_read("Input Data/Geodemographics/NE_Geodemographic_Population.gpkg")
+  # gd_pop <- gd_pop %>%
+  #   select(GEOID, US_GeoDemo_Lookup_Spielman_Singleton_Group, Tot_Pop_2019) %>%
+  #   dplyr::rename(Spielman_Singleton_Group = US_GeoDemo_Lookup_Spielman_Singleton_Group)
+  # 
+  # ## Calculate total pop for each of the Geodemographic categories
+  # ne_pop <- gd_pop %>%
+  #   as.data.frame() %>%
+  #   select(Spielman_Singleton_Group, Tot_Pop_2019) %>%
+  #   group_by(Spielman_Singleton_Group) %>%
+  #   dplyr::summarise(gd_total = sum(Tot_Pop_2019))
+  # ne_pop$ne_total <- sum(ne_pop$gd_total)
+  # ne_pop$gd_prop <- (ne_pop$gd_total / ne_pop$ne_total) * 100
+  # 
+  # ## Calculation total pop in each of the Retail Centres
+  # rc_pop <- catchment %>%
+  #   st_transform(4326) %>%
+  #   st_join(gd_pop) %>%
+  #   as.data.frame() %>%
+  #   select(rcID, rcName, Tot_Pop_2019) %>%
+  #   group_by(rcID, rcName) %>%
+  #   dplyr::summarise(total_rc_pop = sum(Tot_Pop_2019))
+  # 
+  # ## Calculate total population belonging to each geodemographic group, in each retail centre
+  # rc_gd <- catchment %>%
+  #   st_transform(4326) %>%
+  #   st_join(gd_pop) %>%
+  #   as.data.frame() %>%
+  #   select(-c(geom)) %>%
+  #   group_by(rcID, rcName, Spielman_Singleton_Group) %>%
+  #   dplyr::summarise(total_gd_pop = sum(Tot_Pop_2019)) %>%
+  #   spread(Spielman_Singleton_Group, total_gd_pop, fill = 0) 
+  # 
+  # 
+  # ## Add in any extra columns that may be missing 
+  # cols <- c("A: Hispanic & Kids" = NA_real_, "B: Wealthy Nuclear Families" = NA_real_,
+  #           "C: Middle Income, Single Family Homes" = NA_real_, "D: Native American" = NA_real_,
+  #           "E: Wealthy Urbanites" = NA_real_, "F: Low Income and Diverse" = NA_real_,
+  #           "G: Old, Wealthy White" = NA_real_, "H: Low Income, Minority Mix" = NA_real_,
+  #           "I: African American Adversity" = NA_real_, "J: Residential Institutions, Young People" = NA_real_)
+  # col_list <- c("rcID", "rcName", "A: Hispanic & Kids", "B: Wealthy Nuclear Families", "C: Middle Income, Single Family Homes" ,
+  #               "D: Native American", "E: Wealthy Urbanites", "F: Low Income and Diverse", "G: Old, Wealthy White",
+  #               "H: Low Income, Minority Mix", "I: African American Adversity", "J: Residential Institutions, Young People")
+  # rc_gd<- add_column(rc_gd, !!!cols[setdiff(names(cols), names(rc_gd))])
+  # rc_gd <- rc_gd[,col_list]
+  # 
+  # ## Convert to proportions, and divide by national level proportions
+  # rc_gd_pop <- merge(rc_gd, rc_pop, by = c("rcID", "rcName"))
+  # colnames(rc_gd_pop) <- c("rcID", "rcName", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "total_rc_pop")
+  # rc_gd_pop <- rc_gd_pop %>%
+  #   group_by(rcID, rcName) %>%
+  #   mutate(GroupA_prop = (A/total_rc_pop) * 100, GroupB_prop = (B/total_rc_pop) * 100, GroupC_prop = (C/total_rc_pop) * 100,
+  #          GroupD_prop = (D/total_rc_pop) * 100, GroupE_prop = (E/total_rc_pop) * 100, GroupF_prop = (F/total_rc_pop) * 100, 
+  #          GroupG_prop = (G/total_rc_pop) * 100, GroupH_prop = (H/total_rc_pop) * 100, GroupI_prop = (I/total_rc_pop) * 100,
+  #          GroupJ_prop = (J/total_rc_pop) * 100) %>%
+  #   select(rcID, rcName, GroupA_prop, GroupB_prop, GroupC_prop, GroupD_prop, GroupE_prop, 
+  #          GroupF_prop,GroupG_prop, GroupH_prop, GroupI_prop, GroupJ_prop) %>%
+  #   mutate(GroupA_NE_prop = GroupA_prop / 5.62, GroupB_NE_prop = GroupB_prop / 35.6, GroupC_NE_prop = GroupC_prop / 28.7,
+  #          GroupD_NE_prop = GroupD_prop / 0.0327, GroupE_NE_prop = GroupE_prop / 4.67, GroupF_NE_prop = GroupF_prop / 2.15, 
+  #          GroupG_NE_prop = GroupG_prop / 3.31, GroupH_NE_prop = GroupH_prop / 15.6, GroupI_NE_prop = GroupI_prop / 1.48, 
+  #          GroupJ_NE_prop = GroupJ_prop / 2.79) %>%
+  #   select(rcID, rcName,
+  #          GroupA_NE_prop, GroupB_NE_prop, GroupC_NE_prop, GroupD_NE_prop,
+  #          GroupE_NE_prop, GroupF_NE_prop, GroupG_NE_prop, GroupH_NE_prop,
+  #          GroupI_NE_prop, GroupJ_NE_prop)
+  # 
+  # ## Merge onto main dataset
+  # rc_grouped <- merge(rc_grouped, rc_gd_pop, by = c("rcID", "rcName"), all.x = TRUE)
   
   
   ## 7. economic performance
@@ -278,7 +276,19 @@ prep4typology <- function(state) {
   
   
   ## 9. return ######################
-  return(rc_grouped)
+  
+  ## Merge dataframe onto retail centre boundaries
+  boundaries_out <- boundaries %>%
+    select(rcID, rcName)
+  boundaries_out <- merge(boundaries_out, rc_grouped, by = c("rcID", "rcName"), all.x = TRUE)
+  return(boundaries_out)
+  
+  # ## Return a list - dataframe containing variables for analysis, and boundaries with variables attached
+  # out <- list(rc_grouped, boundaries_out)
+  
+  ## Write them out
+  # write.csv(rc_grouped, "Output Data/Typology/NE_typ.csv")
+  # st_write(boundaries_out, "Output Data/Typology/NE_typ.gpkg")
   
 }
 
