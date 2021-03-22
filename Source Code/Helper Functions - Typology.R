@@ -152,7 +152,17 @@ prep4typology <- function(state) {
   rc_grouped <- merge(rc_grouped, roeck, by = c("rcID", "rcName"), all.x = TRUE)
   
   ## 6. geodemographics ######################
-
+  
+  ## Read in Geodemographic variables
+  geodemo <- data.table::fread("Output Data/Typology/NE_Geodemographics.csv")
+  geodemo <- geodemo %>%
+    select(-c(V1))
+  
+  ## Merge onto main dataset
+  rc_grouped <- merge(rc_grouped, geodemo, by = c("rcID", "rcName"), all.x = TRUE)
+  
+  ## BELOW IS HOW TO OBTAIN NE_GEODEMOGRAPHICS TABLE:
+  
   # ## Build centroids for the centres
   # centroids <- st_centroid(boundaries)
   # centroids <- st_transform(centroids, 32616)
@@ -234,26 +244,26 @@ prep4typology <- function(state) {
   
   ## 7. economic performance
   
-  ## Read in Patterns
-  ptns <- data.table::fread("Input Data/Patterns/NorthEast_Patterns_08_06_2020.csv")
-  ptns <- ptns %>%
-    select(safegraph_place_id, raw_visit_counts, raw_visitor_counts, distance_from_home, median_dwell) %>%
-    drop_na(raw_visit_counts, raw_visitor_counts, distance_from_home, median_dwell)
-  
-  ## Merge onto main dataset
-  cl_ptns <- merge(pt_count, ptns, by = "safegraph_place_id", all.x = TRUE)
-  cl_ptns <- cl_ptns %>%
-    as.data.frame() %>%
-    select(rcID, rcName, raw_visit_counts, raw_visitor_counts, distance_from_home, median_dwell) %>%
-    drop_na(raw_visit_counts, raw_visitor_counts, distance_from_home, median_dwell) %>%
-    group_by(rcID, rcName) %>%
-    dplyr::summarise(rc_visits = sum(raw_visit_counts), rc_visitors = sum(raw_visitor_counts), 
-           rc_distance_travelled = median(distance_from_home), rc_median_dwell = median(median_dwell)) %>%
-    select(rcID, rcName, rc_visits, rc_visitors, rc_distance_travelled, rc_median_dwell) %>% 
-    dplyr::rename(total_visits = rc_visits, total_visitors = rc_visitors, median_distance = rc_distance_travelled, median_dwell = rc_median_dwell) %>%
-    unique()
-  ## Merge
-  rc_grouped <- merge(rc_grouped, cl_ptns, by = c("rcID", "rcName"), all.x = TRUE)
+  # ## Read in Patterns
+  # ptns <- data.table::fread("Input Data/Patterns/NorthEast_Patterns_08_06_2020.csv")
+  # ptns <- ptns %>%
+  #   select(safegraph_place_id, raw_visit_counts, raw_visitor_counts, distance_from_home, median_dwell) %>%
+  #   drop_na(raw_visit_counts, raw_visitor_counts, distance_from_home, median_dwell)
+  # 
+  # ## Merge onto main dataset
+  # cl_ptns <- merge(pt_count, ptns, by = "safegraph_place_id", all.x = TRUE)
+  # cl_ptns <- cl_ptns %>%
+  #   as.data.frame() %>%
+  #   select(rcID, rcName, raw_visit_counts, raw_visitor_counts, distance_from_home, median_dwell) %>%
+  #   drop_na(raw_visit_counts, raw_visitor_counts, distance_from_home, median_dwell) %>%
+  #   group_by(rcID, rcName) %>%
+  #   dplyr::summarise(rc_visits = sum(raw_visit_counts), rc_visitors = sum(raw_visitor_counts), 
+  #          rc_distance_travelled = median(distance_from_home), rc_median_dwell = median(median_dwell)) %>%
+  #   select(rcID, rcName, rc_visits, rc_visitors, rc_distance_travelled, rc_median_dwell) %>% 
+  #   dplyr::rename(total_visits = rc_visits, total_visitors = rc_visitors, median_distance = rc_distance_travelled, median_dwell = rc_median_dwell) %>%
+  #   unique()
+  # ## Merge
+  # rc_grouped <- merge(rc_grouped, cl_ptns, by = c("rcID", "rcName"), all.x = TRUE)
   
 
   # 8. urban morphology -----------------------------------------------------
@@ -264,12 +274,17 @@ prep4typology <- function(state) {
   ## Join data with retail centres
   sl_rc <- st_join(boundaries, sl)
   
+  ## Fix numbers in Dist_to_Transit column - values of -9999 are allocated when distance to transit is > 1200m, so we allocate these as
+  ## 1225m (just bigger than 3/4 of a mile)
+  sl_rc$Dist_to_Transit[sl_rc$Dist_to_Transit == -99999] <- 1225
+  
   ## Compute variables
   sl_out <- sl_rc %>%
     as.data.frame() %>%
     group_by(rcID, rcName) %>%
-    summarise(Housing_Count = sum(Housing_Count), Median_Residential_Density = median(Residential_Density),
-              Median_Road_Density = median(Road_Density))
+    summarise(Tot_Res_Count = sum(Res_Count), Med_Res_Density = median(Res_Density), Med_Emp_Density = median(Emp_Density),
+              Med_Retail_Emp_Density = median(Retail_Emp_Density), Med_Road_Density = median(Road_Density),
+              Med_Dist_to_Transit = median(Dist_to_Transit))
   
   ## Join 
   rc_grouped <- merge(rc_grouped, sl_out, by = c("rcID", "rcName"))
@@ -346,6 +361,64 @@ run_typology <- function(db, k = 3) {
   
   out <- list(cl, med)
   return(out)
+}
+
+## Function for re-running the typology, to get nested types 
+get_nested_types <- function(groups, cl = 1, medoids = FALSE) {
+  
+  ## Filter to cluster
+  groups <- groups %>%
+    dplyr::filter(cluster == cl)
+  
+  ## Remove names/id's
+  groups_df <- groups %>%
+    as.data.frame() %>%
+    select(-c(rcID, rcName, cluster, geom))
+  
+  ## Get the silhouette scores
+  ss <- get_silhouette_scores(groups_df)
+  
+  ## Extract max
+  ss_max <- ss[which.max(ss$avg_silhouette_score),]
+  
+  ## Run typology
+  pm <- run_typology(groups_df, k = ss_max$k)
+  
+  ## Formatting for output
+  clustering <- pm[[1]]
+  clustering <- clustering %>%
+    select(cluster) %>%
+    dplyr::rename(type = cluster)
+  
+  ## Join with original groups and merge cluster and type columns together
+  out <- cbind(groups, clustering)
+  out <- out %>%
+    dplyr::rename(group = cluster) %>%
+    select(rcID, rcName, group, type) %>%
+    transform(typ_id = paste(group, type, sep = "."))
+  
+  
+  if (medoids == FALSE) {
+    return(out)
+  } else if (medoids == TRUE) {
+    
+    ## Get id's to merge
+    type_ids <- out %>%
+      as.data.frame() %>%
+      select(group, type, typ_id) %>%
+      unique()
+    
+    ## Extract medoids
+    medoids <- pm[[2]]
+    
+    ## Attach new ID's 
+    medoids <- merge(medoids, type_ids, by.x = "cluster", by.y = "type", all.x = TRUE)
+    medoids <- medoids %>%
+      select(typ_id, variable, cluster_vals, pos) %>%
+      dplyr::rename(cluster = typ_id)
+    return(medoids)
+  }
+  
 }
 
 
@@ -435,6 +508,27 @@ plot_medoids <- function(pm) {
 }
 
 
+
+## Plot type medoids 
+plot_type_medoids <- function(medoids) {
+  
+  ## Split by cluster
+  md_ls <- split(medoids, medoids$cluster)
+  
+  ## Plot all at once
+  plots <- lapply(md_ls, function(x) ggplot(data = x) +
+                    aes(x = reorder(variable, -cluster_vals), y = cluster_vals, fill = pos) +
+                    geom_col(position = "identity", size = 0.25, colour = "black") + 
+                    scale_fill_manual(values = c("#FFDDDD", "#CCEEFF"), guide = FALSE) +
+                    xlab("Variable") +
+                    ylab("Median Values") +
+                    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), axis.ticks = element_line(),
+                          axis.line = element_line(colour = "black"), 
+                          panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+                          panel.background = element_blank()))
+  ggpubr::ggarrange(plotlist = plots, labels = unique(medoids$cluster))
+  
+}
 
 
 
