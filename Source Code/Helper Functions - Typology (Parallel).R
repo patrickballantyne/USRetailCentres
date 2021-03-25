@@ -63,8 +63,53 @@ run_typology <- function(db, k = 3) {
   return(out)
 }
 
+## Function that performs PCA on each group to identify variables worth removing 
+run_type_pca <- function(groups, cl = 1) {
+  
+  ## Filter and process
+  groups <- groups %>%
+    filter(cluster == cl) %>%
+    as.data.frame() %>%
+    select(-c(rcID, rcName, cluster, geom))
+  
+  ## Run PCA
+  pca <- PCA(groups, graph = FALSE)
+  
+  ## Visualise 
+  fviz_contrib(pca, choice = "var", axes = 1:2)
+}
+
+## Function used to help identify best k value to split each group into types
+identify_type_k <- function(groups, cl = 1, col_list) {
+  
+  ## Filter and process
+  groups <- groups %>%
+    filter(cluster == cl) %>%
+    as.data.frame() %>%
+    select(-c(rcID, rcName, cluster, geom))
+  
+  ## Drop insignificant vars
+  groups = groups[,!(names(groups) %in% col_list)]
+  
+  ## Get the silhouette scores
+  ss <- get_silhouette_scores(groups)
+  
+  ## Plot silhouettes
+  silhouettes <- fviz_nbclust(groups,  cluster::pam, method = "silhouette", k.max = 10) +
+    labs(subtitle = "Silhouette Method")
+  
+  ## Plot the elbow
+  elbow <- fviz_nbclust(groups,  cluster::pam, method = "wss", k.max = 10) +
+    labs(subtitle = "Elbow Method")
+  
+  ## Return
+  ls <- list(ss, silhouettes, elbow)
+  return(ls)
+}
+
+
 ## Function for re-running the typology, to get nested types 
-get_nested_types <- function(groups, cl = 1, medoids = FALSE) {
+get_nested_types <- function(groups, cl = 1, k_vals, medoids = FALSE) {
   
   ## Filter to cluster
   groups <- groups %>%
@@ -75,14 +120,12 @@ get_nested_types <- function(groups, cl = 1, medoids = FALSE) {
     as.data.frame() %>%
     select(-c(rcID, rcName, cluster, geom))
   
-  ## Get the silhouette scores
-  ss <- get_silhouette_scores(groups_df)
-  
-  ## Extract max
-  ss_max <- ss[which.max(ss$avg_silhouette_score),]
+  ## Filter k vals to get only the cluster we want
+  k <- k_vals %>%
+    filter(cluster == cl)
   
   ## Run typology
-  pm <- run_typology(groups_df, k = ss_max$k)
+  pm <- run_typology(groups_df, k = k$k)
   
   ## Formatting for output
   clustering <- pm[[1]]
@@ -92,6 +135,7 @@ get_nested_types <- function(groups, cl = 1, medoids = FALSE) {
   
   ## Join with original groups and merge cluster and type columns together
   out <- cbind(groups, clustering)
+  return(out)
   out <- out %>%
     dplyr::rename(group = cluster) %>%
     select(rcID, rcName, group, type) %>%
@@ -241,7 +285,7 @@ plot_type_medoids <- function(medoids) {
                           axis.line = element_line(colour = "black"), axis.title.x = element_blank(),
                           panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
                           panel.background = element_blank()))
-  ggpubr::ggarrange(plotlist = plots, labels = unique(medoids$cluster), vjust = 1.0, align = "hv")
+  ggpubr::ggarrange(plotlist = plots, vjust = 1.0, align = "hv")
   
 }
 
