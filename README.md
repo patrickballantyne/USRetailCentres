@@ -40,9 +40,9 @@ The typology is currently constructed taking into account the following:
 
 At the moment, Geodemographics & Economic Performance have not yet been integrated, due to issues with data coverage and their wider integration into the typology.
 
-All the necessary functions can be found [HERE] (insert URL).
+All the necessary functions can be found [HERE](https://github.com/patrickballantyne/USRetailCentres/blob/main/Source%20Code/Helper%20Functions%20-%20Typology.R).
 
-For improved performance - particularly in extracting optimal k values and performing PCA, there is also a set of functions written to utilise parallelisation, for improved performance. These can be found [HERE] (insert URL). 
+For improved performance - particularly in extracting optimal k values and performing PCA, there is also a set of functions written to utilise parallelisation, for improved performance. These can be found [HERE](https://github.com/patrickballantyne/USRetailCentres/blob/main/Source%20Code/Helper%20Functions%20-%20Typology%20(Parallel).R). 
 
 ---
 
