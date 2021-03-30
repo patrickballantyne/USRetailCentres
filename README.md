@@ -2,7 +2,7 @@
 
 ## American Retail Centre Geographies: Clusters, Characteristics and Catchments 
 
-This repo contains all the code used for Paper Two of my PhD. In this paper, using data from SafeGraph, OSM and USGS we develop a comprehensive classification of retail centre space for the national extent of the US. The paper has three sections/aims:
+This repo contains all the code used for the paper: "American Retail Centre Geographies: Centres, Characteristics and Catchments". In this paper, using data from SafeGraph, OSM and USGS we develop a comprehensive classification of retail centre space for the national extent of the US. The paper has three sections/aims:
 
 1. Retail Centre Delineation
 2. A Typology of American Retail Centres
