@@ -8,6 +8,7 @@ This repo contains all the code used for the paper: "American Retail Centre Geog
 2. A Typology of American Retail Centres
 3. Retail Centre Catchments
 
+To see an overview of the project, take a look at the slides for this repo, which were presented at the Virtual AAG 2021 Conference, available [HERE](https://github.com/patrickballantyne/USRetailCentres/blob/main/AAG_2021_Slides.pptx)
 
 ---
 
