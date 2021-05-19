@@ -39,12 +39,16 @@ poly2h3 <- function(sf, h3_res = 11) {
 }
 
 
-## Modified version of poly2h3, to work on buildings/landuse polygons - fill at a lower resolution and then pull out parent
-## H3's at resolution 11
-buildings2h3 <- function(buildings, lower_res = 12) {
+## Buildings
+buildings2h3 <- function(buildings) {
   
   ## Polyfill at the low resolution
-  b <- poly2h3(buildings, h3_res = lower_res)
+  b <- polyfill(buildings, 12, simple = FALSE)
+  ## Convert 
+  b <- h3_to_polygon(unlist(b$h3_polyfillers), simple = FALSE)
+  b <- b %>%
+    select(h3_address) %>%
+    unique()
   
   ## Extract parent h3's at resolution 11
   p <- get_parent(b$h3_address, 11, FALSE)
@@ -54,10 +58,23 @@ buildings2h3 <- function(buildings, lower_res = 12) {
   
   ## Convert to polygon
   p_h3 <- h3_to_polygon(unlist(p$h3_parent), simple = FALSE)
-  p_h3 <- p_h3 %>%
+  
+  
+  ## Rbind list
+  #rb <- rbind_list(p_h3)
+  
+  ## Extract unique H3's
+  h3 <- p_h3 %>%
     select(h3_address, geometry) %>%
-    rename(geom = geometry)
-  return(p_h3)
+    dplyr::rename(geom = geometry) %>%
+    unique() %>%
+    drop_na()
+  
+  ## Write out
+  # st_write(h3, paste0("output_data/", "MA", "_Retail_H3.gpkg"), append = TRUE)
+  # rm(h3)
+  # gc()
+  # print("CHUNK COMPLETE")
 }
 
 ## Function for turning lines to H3
@@ -81,24 +98,25 @@ lines2h3 <- function(sf, h3_res = 11) {
   return(sf_h3)
 }
 
-## Function that extracts the H3 addresses for all retail features in a state - SafeGraph Buildings, Points and Land-Use Polygons from OSM
+## Function that converts all retail features to H3 for a state
 extract_state_h3 <- function(state = "AL") {
   
   ## 1. Gather Land-Use
-  landuse <- list.files(paste0("Output Data/Land-Use/Processed"), pattern = paste0(state, "_LU.gpkg$"), full.names = TRUE)
+  landuse <- list.files(paste0("input_data/land-use"), pattern = paste0(state, "_LU.gpkg$"), full.names = TRUE)
   landuse <- lapply(landuse, st_read)
   landuse <- do.call(rbind, landuse)
   
   ## 2. Buildings
-  buildings <- list.files(paste0("Output Data/Buildings/"), pattern = paste0(state, "_Retail_Buildings.gpkg$"), full.names = TRUE)
+  buildings <- list.files(paste0("input_data/buildings/"), pattern = paste0(state, "_Retail_Buildings.gpkg$"), full.names = TRUE)
   buildings <- lapply(buildings, st_read)
   buildings <- do.call(rbind, buildings)
   buildings_d <- buildings %>%
-    summarise()
+    summarise(geom) %>%
+    st_as_sf()
   
   ## 3. Points 
   query <- paste0("select* from SafeGraph_Retail_Places_US where region = '", state, "'")
-  pts <- st_read("Output Data/SafeGraph_Retail_Places_US.gpkg", query = query)
+  pts <- st_read("input_data/SafeGraph_Retail_Places_US.gpkg", query = query)
   
   ## 4. Converting to H3
   
@@ -109,7 +127,7 @@ extract_state_h3 <- function(state = "AL") {
   ### Buildings
   if (nrow(buildings) < 100000) {
     
-    bdg_h3 <- buildings2h3(buildings_d, 12)
+    bdg_h3 <- buildings2h3(buildings_d)
     print("Buildings Converted")
     #return(bdg_h3)
     
@@ -119,7 +137,12 @@ extract_state_h3 <- function(state = "AL") {
     
     ## Split into smaller subsets
     bdg_ls <- split(buildings, rep(1:ceiling(nrow(buildings)/50000), each=50000, length.out=nrow(buildings)))
-    bdg_ls <- lapply(bdg_ls, function(x) summarise(x))
+    bdg_ls <- lapply(bdg_ls, function(x) {
+      df_l <- x %>%
+        summarise(geom) %>%
+        st_as_sf()
+      df_l
+    })
     
     ## Apply function on smaller subsets
     bdg_h3 <- lapply(bdg_ls, buildings2h3)
@@ -134,7 +157,7 @@ extract_state_h3 <- function(state = "AL") {
   if(is.null(landuse) == FALSE) {
     
     ## Convert 
-    lu_h3 <- buildings2h3(landuse, 12)
+    lu_h3 <- buildings2h3(landuse)
     print("Land-Use Converted")
     
     ## Join together final features
@@ -152,12 +175,10 @@ extract_state_h3 <- function(state = "AL") {
     print("Returning H3's")
   }
   
-  
   ## 3. Write out
-  st_write(out_h3, paste0("Output Data/Retail H3/", state, "_Retail_H3.gpkg"))
+  st_write(out_h3, append = FALSE, paste0("output_data/Retail_H3/", state, "_Retail_H3.gpkg"))
   
 }
-
 
 
 # 2. OSM Functions --------------------------------------------------------
