@@ -1,6 +1,6 @@
 # USRetailCentres
 
-## American Retail Centre Geographies: Clusters, Characteristics and Catchments 
+## American Retail Centre Geographies: Centres, Characteristics and Catchments 
 
 This repo contains all the code used for the paper: "American Retail Centre Geographies: Centres, Characteristics and Catchments". In this paper, using data from SafeGraph, OSM and USGS we develop a comprehensive classification of retail centre space for the national extent of the US. The paper has three sections/aims:
 
@@ -8,6 +8,7 @@ This repo contains all the code used for the paper: "American Retail Centre Geog
 2. A Typology of American Retail Centres
 3. Retail Centre Catchments
 
+Take a look at the slides for the project 'American Retail Centre Geographies: Centres, Characteristics & Catchments'. The progress on this was presented at the Virtual AAG 2021 Conference which took place mid-April. The slides are available [HERE](https://github.com/patrickballantyne/USRetailCentres/blob/main/AAG_2021_Slides.pptx).
 
 ---
 
