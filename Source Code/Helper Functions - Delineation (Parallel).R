@@ -288,36 +288,37 @@ get_urban_features <- function(state = "AL") {
 
 ## Primary Function - takes Retail Features (H3) and builds tracts, delimited partially by urban features (roads, water), before
 ## using the original points and buildings datasets to define minimum parameters for a retail centre
-get_h3_clusters <- function(retail_features, h3_resolution = 11, min_pts = 10, boundary = FALSE, identifier = "IL") {
+get_h3_clusters <- function(retail_features, min_pts = 10, identifier = "AL") {
   
   ## Start time
+  ptm <- proc.time()
   
   ## 1. Compile a list of h3 addresses for points and polygons ##############################
   h3_list <- retail_features 
-
+  
   ###########################################################################################
   
   ## 1. Do the first round of tracts ########################################################
-  hex_graph <- as_tibble(do.call(rbind, mclapply(as.list(h3_list$h3_address), function(x) get_kring(x, 1), mc.cores = 26))) 
+  hex_graph <- as_tibble(do.call(rbind, mclapply(as.list(h3_list$h3_address), function(x) get_kring(x, 1), mc.cores = 4))) 
   hex_graph <- hex_graph %>%
-      separate(V1, into = paste0("to_", 1:9)) %>%
-      select(-c(1, 9)) %>%
-      gather("neighbourN", "h3_neighbour", -to_2) %>%
-      rename(h3_address = to_2) %>%
-      select(h3_address, h3_neighbour) %>%
-      arrange(h3_address, h3_neighbour) %>%
-      filter(h3_neighbour %in% unique(h3_list$h3_address) & h3_address %in% unique(h3_list$h3_address)) %>%
-      filter(!is.na(h3_address) | h3_address != "") %>%
-      filter(!is.na(h3_neighbour) | h3_neighbour != "") %>%
-      unique() 
+    separate(V1, into = paste0("to_", 1:9)) %>%
+    select(-c(1, 9)) %>%
+    gather("neighbourN", "h3_neighbour", -to_2) %>%
+    dplyr::rename(h3_address = to_2) %>%
+    select(h3_address, h3_neighbour) %>%
+    arrange(h3_address, h3_neighbour) %>%
+    filter(h3_neighbour %in% unique(h3_list$h3_address) & h3_address %in% unique(h3_list$h3_address)) %>%
+    filter(!is.na(h3_address) | h3_address != "") %>%
+    filter(!is.na(h3_neighbour) | h3_neighbour != "") %>%
+    unique() 
   
   ## Create graph object
   i <- as_tbl_graph(hex_graph, directed = FALSE)
   i <- split(names(V(i)), components(i)$membership)
   
   ## Use graph object to build tracts and ID's
-  hex_Graph.N <- mclapply(as.list(1:length(i)), function(x) paste0("tractID_", names(i[x])), mc.cores = 12)
-  i.graph <- as_tibble(do.call(rbind, mclapply(as.list(1:length(i)), function(x) cbind(hex_Graph.N[[x]], i[[x]]), mc.cores = 12)))
+  hex_Graph.N <- mclapply(as.list(1:length(i)), function(x) paste0("tractID_", names(i[x])), mc.cores = 4)
+  i.graph <- as_tibble(do.call(rbind, mclapply(as.list(1:length(i)), function(x) cbind(hex_Graph.N[[x]], i[[x]]), mc.cores = 4)))
   names(i.graph) <- c("tractID", "h3_address")
   
   ## Split by tractID 
@@ -325,30 +326,31 @@ get_h3_clusters <- function(retail_features, h3_resolution = 11, min_pts = 10, b
   igraph_ls <- mclapply(split(i.graph, g), function(x) {
     
     v <- x %>%
-        filter(h3_address %in% unique(h3_list$h3_address)) %>%
-        select(tractID, h3_address) %>%
-        filter(!is.na(tractID) | tractID!="") %>%
-        filter(!is.na(h3_address) | h3_address!="") %>%
-        group_by(tractID) %>%
-        select(tractID, h3_address) %>%
-        unique()
+      filter(h3_address %in% unique(h3_list$h3_address)) %>%
+      select(tractID, h3_address) %>%
+      filter(!is.na(tractID) | tractID!="") %>%
+      filter(!is.na(h3_address) | h3_address!="") %>%
+      group_by(tractID) %>%
+      select(tractID, h3_address) %>%
+      unique()
     
     hl <- unlist(v$h3_address, use.names = TRUE)
     h <- h3_to_polygon(hl)
     h <- st_as_sf(h)
     h <- bind_cols(h, v)
     h <- h %>%
-      rename(geometry = x) %>%
+      dplyr::rename(geometry = x) %>%
       select(h3_address, tractID, geometry)
     return(h)
-
-  }, mc.cores = 12)
+    
+  }, mc.cores = 4)
   
-  igraph_clusters <- do.call(rbind_list, igraph_ls)
+  igraph_clusters <- rbindlist(igraph_ls, use.names = TRUE, fill = FALSE)
+  #igraph_clusters <- do.call(rbind, igraph_ls)
   
   ## Read in the urban features
   urban_features <- get_urban_features(state = identifier)
-
+  
   ## New method - 20/01 for Urban Feature RemovaL
   hex_touch <- fast_intersect(igraph_clusters, urban_features)
   
@@ -362,18 +364,19 @@ get_h3_clusters <- function(retail_features, h3_resolution = 11, min_pts = 10, b
   # 2. Grab the connecting hexagons ###########################################################
   
   ## Grab neighbouring hexagons again
-  hex_connector <- as_tibble(do.call(rbind, mclapply(as.list(igraph_clusters$h3_address), function(x) get_kring(x, 1), mc.cores = 12)))
+  hex_connector <- as_tibble(do.call(rbind, mclapply(as.list(igraph_clusters$h3_address), function(x) get_kring(x, 1), mc.cores = 4)))
   hex_connector <- hex_connector %>%
-      separate(V1, into = paste0("to_", 1:9)) %>%
-      select(-c(1, 9)) %>%
-      gather("neighbourN", "h3_connector", -to_2) %>%
-      rename(h3_address = to_2) %>%
-      select(h3_address, h3_connector) %>%
-      left_join(igraph_clusters, by = "h3_address") %>%
-      unique() %>%
-      filter(!(h3_connector %in% unique(igraph_clusters$h3_address))) %>%
-      filter(!is.na(h3_address) & h3_address != "") %>%
-      filter(!is.na(h3_connector) & h3_connector != "")
+    separate(V1, into = paste0("to_", 1:9)) %>%
+    select(-c(1, 9)) %>%
+    gather("neighbourN", "h3_connector", -to_2) %>%
+    rename(h3_address = to_2) %>%
+    select(h3_address, h3_connector) %>%
+    left_join(igraph_clusters, by = "h3_address") %>%
+    #unique() %>%
+    filter(!(h3_connector %in% unique(igraph_clusters$h3_address))) %>%
+    filter(!is.na(h3_address) & h3_address != "") %>%
+    filter(!is.na(h3_connector) & h3_connector != "") %>%
+    unique()
   
   ## Format connector h3 geoms
   connections <- hex_connector %>%
@@ -386,7 +389,7 @@ get_h3_clusters <- function(retail_features, h3_resolution = 11, min_pts = 10, b
     #filter(n > 1) %>%
     select(tractID, h3_connector) %>%
     unique()
-
+  
   
   ## Format connecting hexagons for out
   hexes_list <- unlist(connections$h3_connector, use.names = TRUE)
@@ -417,7 +420,7 @@ get_h3_clusters <- function(retail_features, h3_resolution = 11, min_pts = 10, b
     select(h3_address)
   
   ## Get neighbouring hexagons
-  hex_graph <- as_tibble(do.call(rbind, mclapply(as.list(igraph_clusters$h3_address), function(x) get_kring(x, 1), mc.cores = 12))) 
+  hex_graph <- as_tibble(do.call(rbind, mclapply(as.list(igraph_clusters$h3_address), function(x) get_kring(x, 1), mc.cores = 4))) 
   hex_graph <- hex_graph %>%
     separate(V1, into = paste0("to_", 1:9)) %>%
     select(-c(1, 9)) %>%
@@ -435,8 +438,8 @@ get_h3_clusters <- function(retail_features, h3_resolution = 11, min_pts = 10, b
   i <- split(names(V(i)), components(i)$membership)
   
   ## Use graph membership to build tracts and ID's
-  hex_Graph.N <- mclapply(as.list(1:length(i)), function(x) paste0("tractID_", names(i[x])), mc.cores = 12)
-  i.graph <- as_tibble(do.call(rbind, mclapply(as.list(1:length(i)), function(x) cbind(hex_Graph.N[[x]], i[[x]]), mc.cores = 12)))
+  hex_Graph.N <- mclapply(as.list(1:length(i)), function(x) paste0("tractID_", names(i[x])), mc.cores = 4)
+  i.graph <- as_tibble(do.call(rbind, mclapply(as.list(1:length(i)), function(x) cbind(hex_Graph.N[[x]], i[[x]]), mc.cores = 4)))
   names(i.graph) <- c("tractID", "h3_address")
   i.graph <- i.graph %>%
     filter(h3_address %in% unique(igraph_clusters$h3_address)) %>%
@@ -468,12 +471,12 @@ get_h3_clusters <- function(retail_features, h3_resolution = 11, min_pts = 10, b
   retail_centre_boundaries <- hexes %>%
     select(tractID) %>%
     group_by(tractID) %>%
-    summarise()
+    dplyr::summarise()
   
   # Read in points
   pts <- read_points(state = identifier)
   pts <- st_transform(pts, 4326)
-
+  
   ## Get count of pts in each rc
   pts_cl <- do.call(rbind, fast_intersection(pts, retail_centre_boundaries))
   pts_cl <- pts_cl %>%
@@ -483,7 +486,7 @@ get_h3_clusters <- function(retail_features, h3_resolution = 11, min_pts = 10, b
     group_by(tractID) %>%
     add_count() %>%
     select(tractID, n) %>%
-    rename(n.pts = n) %>%
+    dplyr::rename(n.pts = n) %>%
     unique()
   boundaries <- merge(retail_centre_boundaries, pts_cl, by = "tractID", all.x = TRUE)
   
@@ -494,26 +497,50 @@ get_h3_clusters <- function(retail_features, h3_resolution = 11, min_pts = 10, b
   
   ## Merge on pt counts
   hexes <- merge(hexes, boundaries_df, by = "tractID", all.x = TRUE)
-
+  
+  ## Get county information 
+  cty <- tigris::county_subdivisions(state = identifier)
+  cty <- cty %>%
+    select(NAME, STATEFP, COUNTYFP) %>%
+    dplyr::rename(County = NAME, County_Code = COUNTYFP)
+  cty <- st_transform(cty, 4326)
+  
+  ## Intersect
+  boundaries <- st_join(boundaries, cty)
+  
   ## Assign new IDs based on identifier and hierarchy (n.pts)
   rcb_m <- boundaries %>%
-    arrange(desc(n.pts))
+    arrange(desc(n.pts, County))
   rcb_m$ID <- seq.int(nrow(rcb_m))
-  rcb_m$ID <- as.character(with(rcb_m, paste(identifier,rcb_m$ID, sep = "")))
+  
+  ## Creating Unique ID and Names
+  rcb_m$rcID <- as.character(with(rcb_m, paste(STATEFP, rcb_m$County_Code, "RC", rcb_m$ID, sep = "_"))) 
+  rcb_m$rcName <- as.character(with(rcb_m, paste(identifier, ",", rcb_m$County, ",", "RC_", rcb_m$ID, sep = "")))
+  rcb_m$State <- identifier
   out_boundaries <- rcb_m %>%
-    select(ID, tractID, n.pts, geometry) %>%
-    rename(rcID = ID)
+    dplyr::rename(State_Code = STATEFP) %>%
+    select(rcID, rcName, tractID, n.pts, State, State_Code, County, County_Code, geometry) %>%
+    drop_na(n.pts) %>%
+    filter(n.pts >= min_pts)
+  #out_boundaries <- st_collection_extract(out_boundaries, "POLYGON")
   
   cl_info <- out_boundaries %>%
     as.data.frame() %>%
-    select(rcID, tractID)
+    select(rcID, rcName, tractID, n.pts, State, State_Code, County, County_Code)
+  
   rf_cl <- merge(hexes, cl_info, by = "tractID", all.x = TRUE)
+  
   out_hexes <- rf_cl %>%
-    select(rcID, tractID, n.pts, geometry) %>%
-    arrange(rcID)
+    select(rcID, rcName, State, State_Code, County, County_Code, h3_address, geometry) %>%
+    arrange(rcID) %>%
+    filter(rcID %in% cl_info$rcID)
+  out_boundaries <- out_boundaries %>%
+    select(-c(tractID))
+  
+  elapsed <- proc.time() - ptm
   
   ## Create list
-  ls <- list(out_boundaries, out_hexes)
+  ls <- list(out_boundaries, out_hexes, elapsed)
   return(ls)
   
 }
