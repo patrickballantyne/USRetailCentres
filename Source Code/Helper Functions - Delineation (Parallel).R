@@ -250,20 +250,12 @@ get_roads <- function(state = "AL") {
 ## https://www.usgs.gov/core-science-systems/ngp/national-hydrography/access-national-hydrography-products
 get_water <- function(state = "AL") {
   
-  ## List files
-  file_list <- list.files(paste0("output_data/Water/", state), pattern = "*shp$", full.names = TRUE)
-  ## Read in and rbind()
-  shp_list <- lapply(file_list, st_read)
-  wtr = lapply(shp_list, "[", c("OBJECTID", "FType", "FCode"))
-  wtr<- plyr::rbind.fill(wtr)
-  
-  ## Clean up and project
+  wtr <- st_read(paste0("output_data/Water/", state, "/NHDArea.shp"))
+  wtr <- st_zm(wtr)
   wtr <- wtr %>%
-    st_as_sf() %>%
-    filter(!FCode == 39010) %>%
-    st_transform(4326) %>%
-    st_zm(drop = TRUE) %>%
-    select(geometry)
+    select(OBJECTID, FCode, FType) %>%
+    st_transform(4326)
+  
   return(wtr)
   
 }
@@ -346,17 +338,20 @@ get_h3_clusters <- function(retail_features, min_pts = 10, identifier = "AL") {
   }, mc.cores = 4)
   
   igraph_clusters <- rbindlist(igraph_ls, use.names = TRUE, fill = FALSE)
+  igraph_clusters <- st_as_sf(igraph_clusters)
   #igraph_clusters <- do.call(rbind, igraph_ls)
   
   ## Read in the urban features
-  urban_features <- get_urban_features(state = identifier)
+  water <- get_water(state = identifier)
   
   ## New method - 20/01 for Urban Feature RemovaL
-  hex_touch <- fast_intersect(igraph_clusters, urban_features)
+  hex_touch <- fast_intersect(igraph_clusters, water)
+  hex_touch <- do.call(rbind, hex_touch)
   
   ## Remove
   igraph_clusters <- igraph_clusters %>%
-    filter(!h3_address %in% hex_touch$h3_address)
+    dplyr::filter(!h3_address %in% hex_touch$h3_address) %>%
+    st_as_sf()
   print("STAGE ONE COMPLETE - FIRST SET OF TRACTS EXTRACTED")
   
   #############################################################################################
@@ -376,6 +371,7 @@ get_h3_clusters <- function(retail_features, min_pts = 10, identifier = "AL") {
     filter(!(h3_connector %in% unique(igraph_clusters$h3_address))) %>%
     filter(!is.na(h3_address) & h3_address != "") %>%
     filter(!is.na(h3_connector) & h3_connector != "") %>%
+    filter(!h3_connector %in% hex_touch$h3_address) %>%
     unique()
   
   ## Format connector h3 geoms
@@ -389,7 +385,6 @@ get_h3_clusters <- function(retail_features, min_pts = 10, identifier = "AL") {
     #filter(n > 1) %>%
     select(tractID, h3_connector) %>%
     unique()
-  
   
   ## Format connecting hexagons for out
   hexes_list <- unlist(connections$h3_connector, use.names = TRUE)
@@ -405,7 +400,7 @@ get_h3_clusters <- function(retail_features, min_pts = 10, identifier = "AL") {
   out <- rbind(igraph_clusters, hexes)
   
   ## Re-run urban features delineation 
-  hex_touch2 <- fast_intersect(out, urban_features)
+  hex_touch2 <- fast_intersect(out, water)
   
   ## Remove
   out <- out %>%
@@ -499,10 +494,10 @@ get_h3_clusters <- function(retail_features, min_pts = 10, identifier = "AL") {
   hexes <- merge(hexes, boundaries_df, by = "tractID", all.x = TRUE)
   
   ## Get county information 
-  cty <- tigris::county_subdivisions(state = identifier)
+  cty <- tigris::counties(state = identifier)
   cty <- cty %>%
-    select(NAME, STATEFP, COUNTYFP) %>%
-    dplyr::rename(County = NAME, County_Code = COUNTYFP)
+    select(NAMELSAD, STATEFP, COUNTYFP) %>%
+    dplyr::rename(County = NAMELSAD, County_Code = COUNTYFP)
   cty <- st_transform(cty, 4326)
   
   ## Intersect
@@ -515,7 +510,7 @@ get_h3_clusters <- function(retail_features, min_pts = 10, identifier = "AL") {
   
   ## Creating Unique ID and Names
   rcb_m$rcID <- as.character(with(rcb_m, paste(STATEFP, rcb_m$County_Code, "RC", rcb_m$ID, sep = "_"))) 
-  rcb_m$rcName <- as.character(with(rcb_m, paste(identifier, ",", rcb_m$County, ",", "RC_", rcb_m$ID, sep = "")))
+  rcb_m$rcName <- as.character(with(rcb_m, paste(identifier, "", ",", "", rcb_m$County, "", ",", "", "RC_", rcb_m$ID, sep = "")))
   rcb_m$State <- identifier
   out_boundaries <- rcb_m %>%
     dplyr::rename(State_Code = STATEFP) %>%
@@ -548,14 +543,15 @@ get_h3_clusters <- function(retail_features, min_pts = 10, identifier = "AL") {
 ## Function that takes two simple features objects and intersects them, using mclapply()
 fast_intersect <- function(sf1, sf2) {
   
-  gv <- rep(1:27, length.out = nrow(sf1))
+  sf1 <- as.data.frame(sf1)
+  gv <- rep(1:24, length.out = nrow(sf1))
   split <- split(sf1, gv)
   
   mclapply(split, function(x) {
     
-    x[sf2, op = st_intersects]}, mc.cores = 27)
+    x <- st_as_sf(x)
+    x[sf2, op = st_intersects]}, mc.cores = 24)
 }
-
 ## Function that takes two simple features objects and returns the intersection, using mclapply()
 fast_intersection <- function(sf1, sf2) {
   
