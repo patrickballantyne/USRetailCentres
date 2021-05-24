@@ -6,6 +6,10 @@ library(tigris)
 library(tmap)
 tmap_mode("view")
 source("Source Code/Helper Functions - Delineation.R")
+source("Source Code/Helper Functions - Naming Strategy.R")
+
+get_names("ID")
+
 
 ## Read in some centres
 rc <- st_read("Output Data/Retail Centres/MT_RC_Boundaries.gpkg")
