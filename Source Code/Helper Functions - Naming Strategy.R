@@ -8,7 +8,7 @@ get_names <- function(identifier = "AL") {
   
   ## Clean
   rc_clean <- rc %>%
-    select(rcID)
+    dplyr::select(rcID)
   places <- places %>%
     select(NAMELSAD) %>%
     rename(place_name = NAMELSAD) %>%
@@ -32,7 +32,7 @@ get_names <- function(identifier = "AL") {
     count(street_address_clean) %>%
     top_n(n = 1) %>%
     group_by(rcID) %>%
-    summarise(street_address_clean = paste0(street_address_clean, collapse = " / "), n = n) %>%
+    summarise(street_address_clean = paste0(street_address_clean, collapse = " / "), n = n, .groups = "keep") %>%
     distinct(street_address_clean) %>%
     rename(street_name = street_address_clean)
   rc_clean <- merge(rc_clean, streets, by = "rcID")
@@ -53,19 +53,44 @@ get_names <- function(identifier = "AL") {
     rename(state = State, county = County)
   rc_clean <- merge(rc_clean, rc_m, by = "rcID")
   
+  ## Pull out largest centre in each place
+  t <- rc_clean %>%
+    as.data.frame() %>%
+    select(-c(geometry)) %>%
+    group_by(place) %>%
+    arrange(desc(n.pts)) %>%
+    top_n(n = 1) 
+  
+  large <- rc_clean %>%
+    filter(rcID %in% t$rcID) %>%
+    mutate(largest_in_place = "TRUE")
+  small <- rc_clean %>%
+    filter(!rcID %in% t$rcID) %>%
+    mutate(largest_in_place = "FALSE")
+  
+  ## Join together and create rcName
+  rc_out <- rbind(large, small)
+  
+  ## Create name depending on whether the centre is largest in place or not
+  rc_out <- rc_out %>%
+    mutate(rcName = case_when(largest_in_place == "TRUE" ~ paste0(place,",",county,",",state),
+                              largest_in_place == "FALSE" ~ paste0(street_name,",",place,",",county,",",state)))
+  
   ## Pull out unique ID 
-  rc_clean <- rc_clean %>%
+  rc_out <- rc_out %>%
     rename(rcID_full = rcID) %>%
-    mutate(rcID = substr(rcID_full, 8, 12:13)) %>%
+    mutate(rcID = substr(rcID_full, 10, 12:13)) %>%
     mutate(rcID = gsub("_", "", rcID)) %>%
     rename(street = street_name) %>%
-    select(rcID_full, rcID, n.pts, street, place, county, state) 
+    select(rcID_full, rcID, rcName, n.pts, street, place, county, state) %>%
+    mutate(rcID = as.integer(rcID)) %>%
+    arrange(rcID)
   
   ## Create final retail centre name
-  rc_clean$rcName <- as.factor(with(rc_clean, paste("(",rcID,")", street, ",", place, ",", county, ",", state)))
-  rc_clean <- rc_clean %>%
-    rename(identifier = rcID_full) %>%
-    select(identifier, rcID, rcName, n.pts, street, place, county, state)
-  st_write(rc_clean, paste0("Output Data/Retail Centres/Named/", identifier, "_RC.gpkg"))
+  # rc_clean$rcName <- as.factor(with(rc_clean, paste("(",rcID,")", street, ",", place, ",", county, ",", state)))
+  # rc_clean <- rc_clean %>%
+  #   rename(identifier = rcID_full) %>%
+  #   select(identifier, rcID, rcName, n.pts, street, place, county, state)
+  st_write(rc_out, paste0("Output Data/Retail Centres/Named/", identifier, "_RC.gpkg"), append = FALSE)
   
 }
