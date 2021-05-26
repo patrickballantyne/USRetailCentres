@@ -26,8 +26,6 @@ get_geocoded_names <- function(identifier = "AL") {
                 distance, lng_access, lat_access, lng_position, lat_position))  %>%
       rename(county = County, state = State)
     
-    
-
     # 2. Getting street names for centres (based on most the street mo --------
     
     ## Read in points and intersect w/ retail centres
@@ -51,7 +49,6 @@ get_geocoded_names <- function(identifier = "AL") {
       rename(street_name = street_address_clean)
     rc_clean <- merge(rc_clean, streets, by = "rcID")
     
-    
     # 3. Stage 3. Identifying the large centres (no street names) ----------------------
     
     ## Get a retail centre name, no street names for large centres
@@ -60,23 +57,23 @@ get_geocoded_names <- function(identifier = "AL") {
                               n.pts >= 100 ~ "LARGE")) %>%
       mutate(rcName_NEW = case_when(size == "LARGE" ~ paste0(city,","," ",county,","," ",state),
                                     size == "SMALL" ~ paste0(street_name,","," ",city,","," ",county,","," ",state))) %>%
+      rename(rcID_full = rcID) %>%
+      mutate(rcID = substr(rcID_full, 10, 12:13)) %>%
+      mutate(rcID = gsub("_", "", rcID)) %>%
       group_by(rcName_NEW) %>%
       add_count(rcName_NEW) %>%
       group_by(rcName_NEW, n) %>%
       mutate(uniqueID = sequence(n())) %>%
       ungroup() %>%
-      mutate(rcName_test = case_when((size == "LARGE" &  n > 1) ~ paste0(city, " ", "(", uniqueID, ")",",", " ", county, ",", state),
-                                     (size == "SMALL" & n > 1) ~ paste0(street_name, " ", "(", uniqueID, ")", ",", " ", city, ",", " ", county, ",", " ", state),
-                                     (size == "LARGE" & n < 2) ~ paste0(city,",", " ",county, ",", state),
-                                     (size == "SMALL" & n < 2) ~ paste0(street_name,",", " ", city, ",", " ", county, ",", " ", state))) %>%
+      mutate(rcName_test = case_when((size == "LARGE" &  n > 1) ~ paste0("RC",rcID, ",", " ", street_name, ",", " ", city,",", " ", state),
+                                     (size == "SMALL" & n > 1) ~ paste0("RC",rcID, ",", " ", street_name, ",", " ", city, ",", " ", state),
+                                     (size == "LARGE" & n < 2) ~ paste0("RC",rcID, ",", " ", street_name, ",", " ", city, ",", " ", state),
+                                     (size == "SMALL" & n < 2) ~ paste0("RC",rcID, ",", " ", street_name, ",", " ", city, ",", " ", state))) %>%
       select(-c(rcName, rcName_NEW)) %>%
-      rename(rcID_full = rcID, rcName = rcName_test, street = street_name, place = city) %>%
-      mutate(rcID = substr(rcID_full, 10, 12:13)) %>%
-      mutate(rcID = gsub("_", "", rcID)) %>%
+      rename(rcName = rcName_test, street = street_name, place = city) %>%
       select(rcID_full, rcID, rcName, n.pts, street, place, county, state) %>%
       mutate(rcID = as.integer(rcID)) %>%
       arrange(rcID)
-    return(by_size)
     
 
     # 4. Write Out ------------------------------------------------------------
@@ -85,12 +82,3 @@ get_geocoded_names <- function(identifier = "AL") {
   }
 }
 
-
-
-
-
-
-
-  
-  
-}
