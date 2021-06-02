@@ -18,8 +18,22 @@ state_ls <- list("DC", "RI")
 ## no need to assign objects
 lapply(state_ls, get_geocoded_names)
 
-t <- get_geocoded_names("WY")
+get_geocoded_names("DC")
 
+ms <- t %>% filter()
+
+
+
+
+
+
+
+
+
+
+
+
+st_write(t, "t.gpkg")
 
 
 #### Testing mall code

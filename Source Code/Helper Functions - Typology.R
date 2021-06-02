@@ -113,24 +113,23 @@ prep4typology <- function(state) {
   
   
   ## 4. chains vs independents #####################
-  chain_or_ind <- data.table::fread("Output Data/Typology/SafeGraph_Places_US_Updated_Chains.csv")
-  pt_count <- merge(pt_count, chain_or_ind, by = c("safegraph_place_id", "location_name"), all.x = TRUE)
+  chain_or_ind <- data.table::fread("Output Data/Typology/SafeGraph_Retail_Chains_NEW.csv")
+  
+  pt_count <- merge(pt_count, chain_or_ind, by = c("brands", "location_name"), all.x = TRUE)
   diversity <- pt_count %>%
-    group_by(rcID, rcName) %>%
-    dplyr::count(chain_or_independent) %>%
     as.data.frame() %>%
-    select(-c(geometry)) %>%
-    spread(chain_or_independent, n) %>%
-    select("rcID", "rcName", "Independent", "National Chain", "Small Multiple") %>%
-    set_names(c("rcID", "rcName", "Independent", "NationalChain", "SmallMultiple")) %>%
-    mutate(Independent = replace(Independent, is.na(Independent), 0)) %>%
-    mutate(NationalChain = replace(NationalChain, is.na(NationalChain), 0)) %>%
-    mutate(SmallMultiple = replace(SmallMultiple, is.na(SmallMultiple), 0)) %>%
-    mutate(total = Independent + NationalChain + SmallMultiple) %>%
-    mutate(pct_Independent = (Independent / total) * 100) %>%
-    mutate(pct_National_Chain = (NationalChain / total) * 100) %>%
-    mutate(pct_Small_Multiple = (SmallMultiple / total) * 100) %>%
-    select(c(rcID, rcName, pct_National_Chain, pct_Small_Multiple, pct_Independent))
+    group_by(rcID, rcName) %>%
+    dplyr::count(new_identifier) %>%
+    spread(new_identifier, n) %>%
+    select("rcID", "rcName", "Independent", "Small Multiple", "National Chain", "Large National Chain") %>%
+    set_names(c("rcID", "rcName", "Independent", "SmallMultiple", "NationalChain", "LargeNationalChain")) %>%
+    replace(is.na(.), 0) %>%
+    mutate(typ_total = Independent + SmallMultiple + NationalChain + LargeNationalChain) %>%
+    mutate(pct_Independent = (Independent / typ_total) * 100) %>%
+    mutate(pct_Small_Multiple = (SmallMultiple / typ_total) * 100) %>%
+    mutate(pct_National_Chain = (NationalChain / typ_total) * 100) %>%
+    mutate(pct_Large_National_Chain = (LargeNationalChain / typ_total) * 100) %>%
+    select(c(rcID, rcName, pct_Independent, pct_Small_Multiple, pct_National_Chain, pct_Large_National_Chain))
   rc_grouped <- merge(rc_grouped, diversity, by = c("rcID", "rcName"), all.x = TRUE)
   
   
@@ -153,13 +152,13 @@ prep4typology <- function(state) {
   
   ## 6. geodemographics ######################
   
-  ## Read in Geodemographic variables
-  geodemo <- data.table::fread("Output Data/Typology/NE_Geodemographics.csv")
-  geodemo <- geodemo %>%
-    select(-c(V1))
-  
-  ## Merge onto main dataset
-  rc_grouped <- merge(rc_grouped, geodemo, by = c("rcID", "rcName"), all.x = TRUE)
+  # ## Read in Geodemographic variables
+  # geodemo <- data.table::fread("Output Data/Typology/NE_Geodemographics.csv")
+  # geodemo <- geodemo %>%
+  #   select(-c(V1))
+  # 
+  # ## Merge onto main dataset
+  # rc_grouped <- merge(rc_grouped, geodemo, by = c("rcID", "rcName"), all.x = TRUE)
   
   ## BELOW IS HOW TO OBTAIN NE_GEODEMOGRAPHICS TABLE:
   
@@ -245,49 +244,48 @@ prep4typology <- function(state) {
   ## 7. economic performance
   
   # ## Read in Patterns
-  # ptns <- data.table::fread("Input Data/Patterns/NorthEast_Patterns_08_06_2020.csv")
-  # ptns <- ptns %>%
-  #   select(safegraph_place_id, raw_visit_counts, raw_visitor_counts, distance_from_home, median_dwell) %>%
-  #   drop_na(raw_visit_counts, raw_visitor_counts, distance_from_home, median_dwell)
-  # 
-  # ## Merge onto main dataset
-  # cl_ptns <- merge(pt_count, ptns, by = "safegraph_place_id", all.x = TRUE)
-  # cl_ptns <- cl_ptns %>%
-  #   as.data.frame() %>%
-  #   select(rcID, rcName, raw_visit_counts, raw_visitor_counts, distance_from_home, median_dwell) %>%
-  #   drop_na(raw_visit_counts, raw_visitor_counts, distance_from_home, median_dwell) %>%
-  #   group_by(rcID, rcName) %>%
-  #   dplyr::summarise(rc_visits = sum(raw_visit_counts), rc_visitors = sum(raw_visitor_counts), 
-  #          rc_distance_travelled = median(distance_from_home), rc_median_dwell = median(median_dwell)) %>%
-  #   select(rcID, rcName, rc_visits, rc_visitors, rc_distance_travelled, rc_median_dwell) %>% 
-  #   dplyr::rename(total_visits = rc_visits, total_visitors = rc_visitors, median_distance = rc_distance_travelled, median_dwell = rc_median_dwell) %>%
-  #   unique()
-  # ## Merge
-  # rc_grouped <- merge(rc_grouped, cl_ptns, by = c("rcID", "rcName"), all.x = TRUE)
+  patterns <- st_read(paste0("E:/SafeGraph Patterns/WEEKLY PATTERNS/2021/STATE PATTERNS/", state, "_RC_Patterns.gpkg"))
+  patterns <- patterns %>%
+    select(safegraph_place_id, parent_safegraph_place_id, 
+           raw_visit_counts, raw_visitor_counts, distance_from_home, median_dwell) %>%
+    rename(visits = raw_visit_counts, visitors = raw_visitor_counts, distance = distance_from_home, dwell = median_dwell) %>%
+    replace(is.na(.), 0) %>%
+    st_transform(4326)
+  
+  ## Intersect w/ boundaries
+  int <- st_intersection(patterns, boundaries)
+  int_df <- int %>%
+    as.data.frame() %>%
+    select(rcID, rcName, visits, visitors, distance, dwell) %>%
+    group_by(rcID, rcName) %>%
+    summarise(total_visits = sum(visits), total_visitors = sum(visitors),
+              median_distance = median(distance), median_dwell = median(dwell))
+  ## Merge
+  rc_grouped <- merge(rc_grouped, int_df, by = c("rcID", "rcName"), all.x = TRUE)
   
 
   # 8. urban morphology -----------------------------------------------------
   
-  ## Read in the Smart Location data for the NorthEast
-  sl <- st_read("Input Data/Smart Location/NorthEast_SL.gpkg")
-  
+  # Read in the Smart Location data for the NorthEast
+  query <- paste0("select* from US_SmartLocation_2017 where State_Name = '", state, "'")
+  sl <- st_read("Input Data/Smart Location/US_SmartLocation_2017.gpkg", query = query)
+
   ## Join data with retail centres
   sl_rc <- st_join(boundaries, sl)
-  
-  ## Fix numbers in Dist_to_Transit column - values of -9999 are allocated when distance to transit is > 1200m, so we allocate these as
-  ## 1225m (just bigger than 3/4 of a mile)
-  sl_rc$Dist_to_Transit[sl_rc$Dist_to_Transit == -99999] <- 1225
-  
+
   ## Compute variables
   sl_out <- sl_rc %>%
     as.data.frame() %>%
     group_by(rcID, rcName) %>%
-    summarise(Tot_Res_Count = sum(Res_Count), Med_Res_Density = median(Res_Density), Med_Emp_Density = median(Emp_Density),
-              Med_Retail_Emp_Density = median(Retail_Emp_Density), Med_Road_Density = median(Road_Density),
-              Med_Dist_to_Transit = median(Dist_to_Transit))
-  
-  ## Join 
+    select(-c(State_Code.x)) %>%
+    rename(State_Code = State_Code.y) %>%
+    summarise(Total_Housing_Units = sum(Housing_Count), Median_Res_Density = median(Residential_Density), Median_Emp_Density = median(Employment_Density),
+              Median_Retail_Emp_Density = median(Retail_Employment_Density), Median_Road_Density = median(Road_Density),
+              Median_Distance_to_Transit = median(Distance_to_Transit))
+
+  ## Join
   rc_grouped <- merge(rc_grouped, sl_out, by = c("rcID", "rcName"))
+  return(rc_grouped)
   
   
   ## 9. return ######################
