@@ -24,7 +24,7 @@ get_geocoded_names <- function(identifier = "AL") {
     rc_clean <- rc_clean %>%
       select(-c(id, rank, street, address, type, house_number, postal_code, district, county, state, country,
                 distance, lng_access, lat_access, lng_position, lat_position))  %>%
-      rename(county = County, state = State)
+     dplyr::rename(county = County, state = State)
     
     # 2. Getting street names for centres (based on most the street mo --------
     
@@ -39,14 +39,14 @@ get_geocoded_names <- function(identifier = "AL") {
     ## Identify the 'major' street of each retail centre
     streets <- m %>% 
       as.data.frame() %>%
-      select(street_address_clean, rcID) %>%
+      dplyr::select(street_address_clean, rcID) %>%
       group_by(rcID) %>%
-      count(street_address_clean) %>%
+      dplyr::count(street_address_clean) %>%
       top_n(n = 1) %>%
       group_by(rcID) %>%
-      summarise(street_address_clean = paste0(street_address_clean, collapse = " / "), n = n, .groups = "keep") %>%
+      dplyr::summarise(street_address_clean = paste0(street_address_clean, collapse = " / "), n = n, .groups = "keep") %>%
       distinct(street_address_clean) %>%
-      rename(street_name = street_address_clean)
+      dplyr::rename(street_name = street_address_clean)
     rc_clean <- merge(rc_clean, streets, by = "rcID")
     
 
@@ -63,7 +63,11 @@ get_geocoded_names <- function(identifier = "AL") {
     rc_malls <- st_intersection(malls, rc)
     rc_malls <- rc_malls %>%
       as.data.frame() %>%
-      select(rcID, location_name)
+      select(rcID, location_name) %>%
+      group_by(rcID) %>%
+      distinct(location_name) %>%
+      dplyr::summarise(location_name = paste0(location_name, collapse = " & ")) %>%
+      mutate(location_name = stringr::str_trunc(location_name, 70))
     rc_clean <- merge(rc_clean, rc_malls, by = "rcID", all.x = TRUE)
     
     ## Create identifier as to whether a centre is a mall or not
@@ -71,60 +75,74 @@ get_geocoded_names <- function(identifier = "AL") {
       mutate(mall_identifier = case_when(is.na(location_name) ~ "NO MALL",
                                          !is.na(location_name) ~ "MALL"))
     
-
-    # 4. Identifying the Major Centres in each place --------------------------
     
-    ## 
-    places <- rc_clean %>%
+    # 4. Identifying those in Major Cities  -------------------------------------------------
+    
+    ## Read in the city
+    query <- paste0("select* from CityBoundaries where ST = '", identifier, "'")
+    cities <- st_read("Input Data/US_Cities/CityBoundaries.shp", query = query)
+    cities <- cities %>%
+      select(NAME) %>%
+      dplyr::rename(city_name = NAME) %>%
+      st_transform(4326)
+    
+    ## Identify those centres that are in a major city
+    rc_cities <- st_intersection(cities, rc)
+    rc_cities <- rc_cities %>%
       as.data.frame() %>%
-      select(rcID, city, n.pts, mall_identifier)
+      select(rcID, city_name) %>%
+      group_by(rcID) %>%
+      distinct(city_name) %>%
+      dplyr::summarise(city_name = paste0(city_name, collapse = " & "))
+    rc_clean <- merge(rc_clean, rc_cities, by = "rcID", all.x = TRUE)
     
-    ## Drop out the malls
-    ms <- places %>% 
-      filter(mall_identifier == "MALL")
-    ns <- places %>% 
-      filter(mall_identifier == "NO MALL")
+    ## Create identifier as to whether a centre is in a major city or not
+    rc_clean <- rc_clean %>%
+      mutate(city_identifier = case_when(is.na(city_name) ~ "NO CITY",
+                                         !is.na(city_name) ~ "CITY"))
     
-    ## Create identifier if largest centre in city
-    tops <- ns %>%
+    # 5. Identifying the larges in places outside of Cities -------------------
+
+    
+    ## Create lookup of whether rc is largest in place
+    tops <- rc_clean %>%
+      as.data.frame() %>%
       group_by(city) %>%
       top_n(1, wt = n.pts) %>%
       mutate(hier_identifier = "LARGEST") %>%
       select(rcID, hier_identifier)
     rc_clean <- merge(rc_clean, tops, by = "rcID", all.x = TRUE)
-    
-    # 4. Stage 5. Creating Names  ----------------------
-    
-    ## Get a retail centre name, no street names for large centres
-    by_size <- rc_clean %>%
-      # mutate(size = case_when(n.pts < 100 ~ "SMALL",
-      #                         n.pts >= 100 ~ "LARGE")) %>%
-      # mutate(rcName_NEW = case_when(size == "LARGE" ~ paste0(city,","," ",county,","," ",state),
-      #                               size == "SMALL" ~ paste0(street_name,","," ",city,","," ",county,","," ",state))) %>%
-      rename(rcID_full = rcID, city = city.x) %>%
+
+    # 6. Create Retail Centre Names -------------------------------------------
+
+    ## Conditional Naming
+    out <- rc_clean %>%
+      dplyr::rename(rcID_full = rcID, city = city.x) %>%
       select(-c(city.y)) %>%
       mutate(rcID = substr(rcID_full, 10, 12:13)) %>%
       mutate(rcID = gsub("_", "", rcID)) %>%
-      # group_by(rcName_NEW) %>%
-      # add_count(rcName_NEW) %>%
-      # group_by(rcName_NEW, n) %>%
-      # mutate(uniqueID = sequence(n())) %>%
-      # ungroup() %>%
-      mutate(rcName_test = case_when(mall_identifier == "MALL" ~ paste0(location_name, ",", " ", city, ",", " ", state),
-                                     (hier_identifier == "LARGEST" & mall_identifier == "NO MALL") ~ paste0(city,",", " ", state),
-                                     (is.na(hier_identifier) & mall_identifier == "NO MALL") ~ paste0(street_name, ",", " ", city, ",", " ", state))) %>%
-                                     # (size == "LARGE" & n < 2 & mall_identifier == "NO MALL") ~ paste0(street_name, ",", " ", city, ",", " ", state),
-                                     # (size == "SMALL" & n < 2 & mall_identifier == "NO MALL") ~ paste0(street_name, ",", " ", city, ",", " ", state))) 
-      select(-c(rcName, mall_identifier, hier_identifier)) %>%
-      rename(rcName = rcName_test, street = street_name, place = city) %>%
-      select(rcID_full, rcID, rcName, n.pts, street, place, county, state) %>%
+      mutate(rcName_test = case_when(city_identifier == "CITY" & mall_identifier == "NO MALL" & n.pts < 1000 & is.na(hier_identifier) ~ paste0(street_name, ",", " ", city_name, ",", " ", state),
+                                     city_identifier == "CITY" & mall_identifier == "NO MALL" & n.pts < 1000 & hier_identifier == "LARGEST" ~ paste0(city_name, ",", " ", state),
+                                     city_identifier == "CITY" & mall_identifier == "MALL" & n.pts < 1000 & is.na(hier_identifier) ~ paste0(location_name, ",", " ", city_name, ",", " ", state),
+                                     city_identifier == "CITY" & mall_identifier == "MALL" & n.pts < 1000 & hier_identifier == "LARGEST" ~ paste0(city_name, ",", " ", state),
+                                     city_identifier == "CITY" & mall_identifier == "MALL" & n.pts >= 1000 ~ paste0(city_name,  ",", " ", state),
+                                     city_identifier == "NO CITY" & mall_identifier == "MALL" ~ paste0(location_name, ",", " ", city, ",", " ", state),
+                                     city_identifier == "NO CITY" & mall_identifier == "NO MALL" & hier_identifier == "LARGEST" ~ paste0(city, ",", " ", state),
+                                     city_identifier == "NO CITY" & mall_identifier == "NO MALL" & is.na(hier_identifier) ~ paste0(street_name, ",", " ", city, ",", " ", state))) %>%
+      group_by(rcName_test) %>%
+      add_count(rcName_test) %>%
+      group_by(rcName_test, n) %>%
+      arrange(desc(n.pts)) %>%
+      dplyr::mutate(uniqueID = sequence(n())) %>%
+      mutate(rcName = case_when(n == 1 ~ paste0(rcName_test),
+                                   n > 1 ~ paste0(rcName_test, " ", "(", uniqueID, ")"))) %>%
+      select(rcID_full, rcID, rcName, n.pts, street_name, city, county, state) %>%
+      rename(street = street_name, place = city) %>%
       mutate(rcID = as.integer(rcID)) %>%
       arrange(rcID)
-      
-    
 
     # 4. Write Out ------------------------------------------------------------
-    st_write(by_size, paste0("Output Data/Retail Centres/Named/", identifier, "_RC.gpkg"), append = FALSE)
+    st_write(out, paste0("Output Data/Retail Centres/Named/", identifier, "_RC.gpkg"), append = FALSE)
     
   }
 }
