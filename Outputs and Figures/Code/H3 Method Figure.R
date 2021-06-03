@@ -49,7 +49,9 @@ ct <- ct %>%
 con_tracts <- get_h3_clusters(h3, 20, "PA")
 con_tracts_d <- con_tracts %>%
   group_by(tractID) %>%
-  st_union()
+  st_union() %>%
+  mutate(rcName = case_when(rcID == "PA1" ~ "Montgomery Mall, Airport Square & Five Points Plaza",
+                            rcID == "PA2 ~ Montgomery Square"))
 ## Final tracts 
 final_tracts <- con_tracts %>% filter(n.pts >= 20)
 
@@ -209,7 +211,7 @@ p6 <- tm_shape(rds) +
   tm_shape(final_tracts) +
   tm_fill(col = "tractID", alpha = 0.75, legend.show = FALSE) +
   tm_borders(col = "black") +
-  tm_text("rcID", size = 0.8, bg.color = "white", fontface = "bold", bg.alpha = 0.75) +
+  tm_text("rcName", size = 0.8, bg.color = "white", fontface = "bold", bg.alpha = 0.75) +
   #tm_shape(lu) +
   #tm_fill(col = NA, alpha = 0.5) +
   #tm_borders(col = "red", lwd = 1.5) +
