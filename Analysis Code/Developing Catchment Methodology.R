@@ -149,3 +149,11 @@ tm_shape(test_rc) +
   tm_shape(out) +
   tm_fill(col = "orange", alpha = 0.2) +
   tm_borders(col = "orange")
+
+
+
+
+
+install.packages("sqldf")
+library(sqldf)
+test <- read.csv.sql("Output Data/SafeGraph_Places_Categories_LDC.csv", "select *, from file where ldc_aggregation = 'MISC'", sep = "")
