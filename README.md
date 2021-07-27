@@ -49,5 +49,7 @@ For improved performance - particularly in extracting optimal k values and perfo
 
 ## Part Three - Retail Centre Catchments
 
+To delineate catchments for the Retail Centres, we utilise the SafeGraph 'weekly patterns' dataset, utilising the 'visitor_home_aggregation' to list census tracts visiting each centre, and then refining these.
 
+This is a work in progress, but code can be found [HERE](https://github.com/patrickballantyne/USRetailCentres/blob/main/Analysis%20Code/Developing%20Catchment%20Methodology.R)
 
