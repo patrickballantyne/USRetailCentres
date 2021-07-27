@@ -232,9 +232,9 @@ get_osm_polygons <- function(bb = "Illinois, US", d = 15) {
 read_points <- function(state = "AL") {
   
   ## Read in the points for the selected state
-  query <- paste0("select* from SafeGraph_Retail_Places_US where region = '", state, "'")
-  pts <- st_read("Output Data/SafeGraph_Retail_Places_US.gpkg", query = query)
-  pts <- st_transform(pts, 4326)
+  query <- paste0("select* from SafeGraph_Retail_Places_CLEAN where region = '", state, "'")
+  pts <- st_read("Output Data/SafeGraph_Retail_Places_CLEAN.gpkg", query = query)
+  pts <- st_set_crs(pts, 4326)
   return(pts)
 }
 
@@ -523,6 +523,7 @@ get_h3_clusters <- function(retail_features, min_pts = 10,  identifier = "IL") {
   out_boundaries <- rcb_m %>%
     select(ID, tractID, n.pts, geometry) %>%
     rename(rcID = ID)
+  return(out_boundaries)
   
   cl_info <- out_boundaries %>%
     as.data.frame() %>%
