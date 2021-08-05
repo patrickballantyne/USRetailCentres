@@ -1,10 +1,20 @@
 ## Function for pulling in the patterns for a state
-get_patterns <- function(state = "AL") {
+get_patterns <- function(state = "AL", duckdb = mydb, week = "july2021") {
   
-  ## Filter by region to pull in state of interest 
-  query <- paste0("select* from SafeGraph_Patterns_July2021 where region = '", state, "'")
-  ptns <- st_read("Output Data/Patterns/SafeGraph_Patterns_July2021.gpkg", query = query)
-  return(ptns)
+  ## Read in the patterns from the duck database
+  ptns <- dbGetQuery(mydb, paste0("SELECT * FROM", " ", week, " ", " WHERE region = '", state, "'"))
+  print("PATTERNS EXTRACTED")
+  
+  ## Read in the points to match 
+  pts_query <- paste0("select* from SafeGraph_Cleaned_Places_US where region = '", state, "'") 
+  pts <- st_read("Output Data/SafeGraph_Cleaned_Places_US.gpkg", query = pts_query)
+  pts <- pts %>% select(placekey)
+  print("POINTS EXTRACTED")
+  
+  ## Merge
+  ptns_sf <- merge(pts, ptns, by = "placekey", all.x = TRUE)
+  print(paste0(week, "PATTERNS CLEANED"))
+  return(ptns_sf)
 }
 
 ## Function for extracting list of census tracts and total visits to each 
