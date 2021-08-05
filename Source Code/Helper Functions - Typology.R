@@ -32,6 +32,26 @@ w <- c("AZ", "CO", "ID", "MT", "NV", "NM", "UT", "WY",
        "AK", "CA", "HI", "OR", "WA")
 
 
+## Clean the retail centres - extract those w/ over 100 pts only
+subset_centres <- function(min_pts = 100) {
+  
+  ## Read them in 
+  ls <- list.files(paste0("Output Data/Retail Centres/Named"), pattern = paste0("_RC_Named.gpkg$"), full.names = TRUE)
+  centres <- lapply(ls, st_read)
+  centres <- do.call(rbind, centres)
+  
+  ## Clean columns
+  centres <- centres %>%
+    select(rcID_full, rcName, street, place, county, state, n.pts) %>%
+    setNames(c("rcID", "rcName", "Street", "Place", "County", "State", "N.pts", "geom")) %>%
+    dplyr::filter(N.pts >= min_pts)
+  
+  ## Write out 
+  st_write(centres, paste0("Output Data/Retail Centres/US Retail Centres/US_RC", "_minPts", min_pts, ".gpkg"))
+  print("RETAIL CENTRES CLEANED")
+}
+
+
 ## Function that extracts all the variables needed to run the typology for the retail centres
 prep4typology <- function(state) {
   
