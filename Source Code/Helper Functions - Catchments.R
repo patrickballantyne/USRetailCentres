@@ -18,15 +18,15 @@ get_patterns <- function(state = "AL", duckdb = mydb, week = "july2021") {
 }
 
 ## Function for extracting list of census tracts and total visits to each 
-extract_catchments <- function(state = "AL") {
+extract_catchments <- function(rc, ptns, state = "AL", geography = "Block") {
   
   ## Read in the patterns
   #ptns <- get_patterns(state)
-  ptns <- st_read("Output Data/Patterns/MT_Patterns_July2021.gpkg")
+  #ptns <- st_read("Output Data/Patterns/MT_Patterns_July2021.gpkg")
   
   ## Read in the retail centres
   #rc <- get_retail_centres(state)
-  rc <- st_read("Output Data/Retail Centres/MT_RC_Boundaries.gpkg")
+  #rc <- st_read("Output Data/Retail Centres/MT_RC_Boundaries.gpkg")
   
 
   # 1. Cleaning -------------------------------------------------------------
@@ -43,35 +43,50 @@ extract_catchments <- function(state = "AL") {
   ## Strip out the patterns associated w/ parents
   parents <- ptns_clean %>%
     as.data.frame() %>%
-    select(-c(geom, placekey)) %>%  
+    select(-c(geometry, placekey)) %>%  
     filter(!is.na(parent_placekey))
   ptns_noparents <- ptns_clean %>%
     filter(!parent_placekey %in% parents$parent_placekey)
   
 
-  # 2. Pulling out Census Tracts --------------------------------------------
+  # 2. Pulling out Census Tracts & Census Block Groups --------------------------------------------
   
-  ## Using SafeGraphR to expand the json columns
-  poi_home_tracts <- expand_cat_json(ptns_noparents, 
+  ## Using SafeGraphR to get Census Tracts
+  poi_home_tracts <- expand_cat_json(ptns_noparents,
                                      expand = "visitor_home_aggregation",
                                      index = "visitor_home_tract",
                                      by = "placekey")
-  parent_home_tracts <- expand_cat_json(parents, 
+  parent_home_tracts <- expand_cat_json(parents,
                                         expand = "visitor_home_aggregation",
                                         index = "visitor_home_tract",
                                         by = "parent_placekey")
   parent_home_tracts <- parent_home_tracts %>% rename(placekey = parent_placekey)
-  
   home_tracts <- rbind(poi_home_tracts, parent_home_tracts)
-  
+  # 
+  ## Using SafeGraphR to get Census Block Groups
+  # poi_home_cbgs <- expand_cat_json(ptns_noparents, 
+  #                                  expand = "visitor_home_cbgs",
+  #                                  index = "visitor_home_cbg",
+  #                                  by = "placekey")
+  # parent_home_cbgs <- expand_cat_json(parents, 
+  #                                     expand = "visitor_home_cbgs",
+  #                                     index = "visitor_home_cbg",
+  #                                     by = "parent_placekey")
+  # parent_home_cbgs <- parent_home_cbgs %>% rename(placekey = parent_placekey)
+  # home_cbgs <- rbind(poi_home_cbgs, parent_home_cbgs)
   
 
   # 3. Patterns in Retail Centres -------------------------------------------
   
+  ## CRS
+  ptns <- st_set_crs(ptns, 4326)
+  
   ## Identify
   p_rc <- st_intersection(ptns, rc)
-  p_rc <- merge(p_rc, home_tracts, by = "placekey", all.x = TRUE)
-  p_rc <- p_rc %>%
+  p_rc_tracts <- merge(p_rc, home_tracts, by = "placekey", all.x = TRUE)
+  #p_rc_blocks <- merge(p_rc, home_cbgs, by = "placekey", all.x = TRUE)
+  
+  p_rc_tracts <- p_rc_tracts %>%
     rename(n.visits = visitor_home_aggregation.y) %>%
     drop_na("n.visits") %>%
     as.data.frame() %>%
@@ -80,10 +95,19 @@ extract_catchments <- function(state = "AL") {
     distinct() %>%
     group_by(Census_Tract, rcID) %>%
     summarise(n.visits = sum(n.visits))
+  # p_rc_blocks <- p_rc_blocks %>%
+  #   rename(n.visits = visitor_home_cbgs.y) %>%
+  #   drop_na("n.visits") %>%
+  #   as.data.frame() %>%
+  #   select(visitor_home_cbg, rcID, n.visits) %>%
+  #   rename(Census_CBG = visitor_home_cbg) %>%
+  #   distinct() %>%
+  #   group_by(Census_CBG, rcID) %>%
+  #   summarise(n.visits = sum(n.visits))
 
     
   
-  # 4. Attaching to Tracts --------------------------------------------------
+  # 4. Attaching to Tracts/Blocks --------------------------------------------------
   
   ## Tracts shapefile from Spielman & Singleton (2015)
   geodemo <- st_read("Input Data/Geodemographics/US_Geodemographic_Classification.gpkg")
@@ -91,10 +115,20 @@ extract_catchments <- function(state = "AL") {
     select(GEOID10) %>%
     rename(Census_Tract = GEOID10)
   
+  ## Blocks shapefile processed from Tiger
+  blocks <- st_read("Input Data/Census Block Groups/US_Census_Block_Groups.gpkg")
+  blocks <- blocks %>%
+    select(CBG_ID) %>%
+    rename(Census_CBG = CBG_ID)
+  
   ## Attach count
-  tracts <- merge(geodemo, p_rc, by = "Census_Tract", all.y = TRUE)
+  tracts <- merge(geodemo, p_rc_tracts, by = "Census_Tract", all.y = TRUE)
   tracts <- tracts[!st_is_empty(tracts),,drop = FALSE]
   tracts <- st_cast(tracts, "POLYGON")
+  
+  # blocks <- merge(blocks, p_rc_blocks, by = "Census_CBG", all.y = TRUE)
+  # blocks <- blocks[!st_is_empty(blocks),,drop = FALSE]
+  # blocks <- st_cast(blocks, "POLYGON")
   
   ## Clean out repeated rows 
   tracts_df <- tracts %>%
@@ -102,19 +136,34 @@ extract_catchments <- function(state = "AL") {
     select(-c(geometry)) %>%
     mutate_if(is.character, as.factor) %>%
     distinct()
+  # blocks_df <- blocks %>%
+  #   as.data.frame() %>%
+  #   select(-c(geometry)) %>%
+  #   mutate_if(is.character, as.factor) %>%
+  #   distinct()
   
   ## Re attach
   gd_tracts <- merge(geodemo, tracts_df, by = "Census_Tract", all.y = TRUE)
+  # gd_blocks <- merge(blocks, blocks_df, by = "Census_CBG", all.y = TRUE)
+  # gd_blocks <- gd_blocks %>% select(-c(rcID.y, n.visits.y)) %>% rename(rcID = rcID.x, n.visits = n.visits.x) %>% distinct()
 
   ## Total visits in each retail centre
-  grp_totals <- gd_tracts %>%
+  tract_grp_totals <- gd_tracts %>%
     as.data.frame() %>%
     select(-c(geometry)) %>%
     group_by(rcID) %>%
     summarise(total.rc.visits = sum(n.visits))
+  # block_grp_totals <- gd_blocks %>%
+  #   as.data.frame() %>%
+  #   select(-c(geometry)) %>%
+  #   group_by(rcID) %>%
+  #   summarise(total.rc.visits = sum(n.visits)) %>%
+  #   mutate_if(is.character, as.factor)
+  
   
   ## Merge on
-  gd_tracts <- merge(gd_tracts, grp_totals, by = "rcID", all.x = TRUE)
+  gd_tracts <- merge(gd_tracts, tract_grp_totals, by = "rcID", all.x = TRUE)
+  #gd_blocks <- merge(gd_blocks, block_grp_totals, by = "rcID", all.x = TRUE)
   
 
   # 5. Refining Catchments --------------------------------------------------
@@ -127,18 +176,25 @@ extract_catchments <- function(state = "AL") {
     mutate(prop_visits = (n.visits / total.rc.visits) * 100) %>%
     arrange(rcID, -prop_visits) %>%
     mutate_if(is.character, as.factor)
-  
-
+  # gd_blocks <- gd_blocks %>%
+  #   mutate(prop_visits = (n.visits / total.rc.visits) * 100) %>%
+  #   arrange(rcID, -prop_visits) %>%
+  #   mutate_if(is.character, as.factor)
+    
   # 5.2 Distance from Retail Centre ------------------------------------------
   
   
   ## Build up datasets for calculation
   t_cent <- st_centroid(gd_tracts)
   t_cent <- t_cent %>% select(Census_Tract)
+  # b_cent <- st_transform(st_centroid(gd_blocks), 4326)
+  # b_cent <- b_cent %>% select(Census_CBG)
   rc_cent <- st_centroid(rc)
   rc_cent <- rc_cent %>% select(rcID)
   
   ## Calculate & tidy distances
+  
+  ### Tracts first 
   m <- st_distance(rc_cent, t_cent)
   rownames(m) <- rc_cent$rcID
   colnames(m) <- t_cent$Census_Tract
@@ -146,6 +202,15 @@ extract_catchments <- function(state = "AL") {
   m <- as.data.frame(m)
   rownames(m) <- rc_cent$rcID
   colnames(m) <- t_cent$Census_Tract
+  
+  ### Blocks second
+  # n <- st_distance(rc_cent, b_cent)
+  # rownames(n) <- rc_cent$rcID
+  # colnames(n) <- b_cent$Census_CBG
+  # n <- set_units(n, "km")
+  # n <- as.data.frame(n)
+  # rownames(n) <- rc_cent$rcID
+  # colnames(n) <- b_cent$Census_CBG
   
   ## Convert format - each row has rcID, census tract and distance in kms
   m_long <- m %>%
@@ -157,27 +222,50 @@ extract_catchments <- function(state = "AL") {
     mutate(Census_Tract = gsub("\\..*", "", Census_Tract)) %>%
     distinct() %>%
     arrange(rcID, Distance)
+  # n_long <- n %>%
+  #   rownames_to_column() %>%
+  #   rename(rcID = rowname) %>%
+  #   gather(Census_CBG, Distance, -rcID, factor_key = FALSE) %>%
+  #   mutate(Distance = gsub("[km]", "", Distance)) %>%
+  #   mutate(Distance = as.numeric(Distance)) %>%
+  #   mutate(Census_CBG = gsub("\\..*", "", Census_CBG)) %>%
+  #   distinct() %>%
+  #   arrange(rcID, Distance)
   
   ## Merge distances on
   gd_tracts <- merge(gd_tracts, m_long, by = c("rcID", "Census_Tract"), all.x = TRUE)
+  #gd_blocks <- merge(gd_blocks, n_long, by = c("rcID", "Census_CBG"), all.x = TRUE)
+  return(gd_tracts)
   
   # 3.3 Refinement Strategy -------------------------------------------------
   
   ## Tidy up, arrange by Distance (low-high) and Visits (high-low) before computing cumulative visits
-  out_tracts <- gd_tracts %>% 
-    select(rcID, Census_Tract, Distance, prop_visits, n.visits, total.rc.visits) %>%
-    rename(TractVisits = n.visits, TotalVisits = total.rc.visits, PropVisits = prop_visits) %>%
+  # out_tracts <- gd_tracts %>% 
+  #   select(rcID, Census_Tract, Distance, prop_visits, n.visits, total.rc.visits) %>%
+  #   rename(TractVisits = n.visits, TotalVisits = total.rc.visits, PropVisits = prop_visits) %>%
+  #   arrange(rcID, desc(PropVisits), Distance) %>%
+  #   group_by(rcID) %>%
+  #   mutate(Catchment = cumsum(PropVisits)) %>%
+  #   ungroup() %>%
+  #   mutate_if(is.character, as.factor) %>%
+  #   filter(Catchment <= 50)
+  #out_tracts <- st_cast(out_tracts, "POLYGON")
+  
+  out_blocks <- gd_blocks %>%
+    select(rcID, Census_CBG, Distance, prop_visits, n.visits, total.rc.visits) %>%
+    rename(BlockVisits = n.visits, TotalVisits = total.rc.visits, PropVisits = prop_visits) %>%
     arrange(rcID, desc(PropVisits), Distance) %>%
     group_by(rcID) %>%
     mutate(Catchment = cumsum(PropVisits)) %>%
     ungroup() %>%
     mutate_if(is.character, as.factor) %>%
     filter(Catchment <= 50)
-  out_tracts <- st_cast(out_tracts, "POLYGON")
-  return(out_tracts)
+  out_blocks <- st_cast(out_blocks, "POLYGON")
   
-  
-  
-  
+  if (geography == "Tract") {
+    return(out_tracts)
+  } else if (geography == "Block") {
+    return(out_blocks)
+  }
   
 }
