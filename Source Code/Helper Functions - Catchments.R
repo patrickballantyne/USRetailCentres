@@ -17,6 +17,166 @@ get_patterns <- function(state = "AL", duckdb = mydb, week = "july2021") {
   return(ptns_sf)
 }
 
+## Get retail centres
+get_rc <- function(state = "AL") {
+  
+  rc_query <- paste0("select* from US_RC_minPts50 where State = '", state, "'") 
+  rc <- st_read("Output Data/Retail Centres/US Retail Centres/US_RC_minPts50.gpkg", query = rc_query)
+  return(rc)
+}
+
+## Function that reads in SafeGraph retail points for a state of interest
+get_pts <- function(state = "AL") {
+  
+  ## Read in the points for the selected state
+  query <- paste0("select* from SafeGraph_Cleaned_Places_US where region = '", state, "'")
+  pts <- st_read("Output Data/SafeGraph_Cleaned_Places_US.gpkg", query = query)
+  return(pts)
+}
+
+## Get attractiveness score for a set of retail centres
+get_attractive <- function(state = "AL") {
+  
+  ## Read in centres
+  rc <- get_rc(state = state)
+  rc_out <- rc %>% 
+    as.data.frame() %>%
+    select(rcID, rcName, N.pts)
+  
+  ## Get points and patterns
+  pts <- get_pts(state = state)
+  pts <- pts %>% select(top_category, sub_category) %>% st_set_crs(4326)
+  ptns <- get_patterns(state = state, mydb, "july2021")
+  ptns <- ptns %>% select(placekey, raw_visit_counts) %>% st_set_crs(4326)
+  
+  ## Intersections
+  pts_int <- st_intersection(pts, rc)
+  ptns_int <- st_intersection(ptns, rc)
+  
+  ## Calculate category diversity
+  topcat_total <- 190 ## n. of distinct safegraph top categories
+  subcat_total <- 378 ## n. of distinct safegraphg sub categories
+  div <- pts_int %>%
+    as.data.frame() %>%
+    select(rcID, top_category, sub_category) %>%
+    group_by(rcID) %>%
+    summarise(n_topcat = n_distinct(top_category),
+              n_subcat = n_distinct(sub_category)) %>%
+    mutate(top_cat_prop = n_topcat / topcat_total, 
+           sub_cat_prop = n_subcat / subcat_total)
+  
+  ## Calculate total visits
+  visits <- ptns_int %>%
+    as.data.frame() %>%
+    select(rcID, raw_visit_counts) %>%
+    mutate_if(is.numeric, ~replace_na(., 0)) %>%
+    group_by(rcID) %>%
+    summarise(total_visits = sum(raw_visit_counts))
+  
+  ## Merge and calculate better version of total visits
+  attr <- merge(rc_out, div, by = "rcID")
+  attr <- merge(attr, visits, by = "rcID")
+  attr$visits_prop <- attr$total_visits / attr$N.pts
+  
+  ## Rescale
+  attr$r_N.pts <- scales::rescale(attr$N.pts, to = c(0, 1))
+  attr$r_top_cat_prop <- scales::rescale(attr$top_cat_prop, to = c(0, 1))
+  attr$r_visits_prop <- scales::rescale(attr$visits_prop, to = c(0, 1))
+  
+  ## Build indicator
+  attr <- attr %>%
+    select(rcID, r_N.pts, r_top_cat_prop, r_visits_prop) %>%
+    mutate(attr_score = r_N.pts + r_top_cat_prop + r_visits_prop) %>%
+    select(rcID, attr_score)
+  return(attr)
+  
+}
+
+## Function returning the euclidean distances between two objects - designed for CBGs and Retail Centres
+get_euclidean <- function(x, y) {
+  
+  ## Row and column names
+  cols <- as.vector(y$rcID)
+  rows <- as.vector(x$Census_Block_Group)
+  
+  ## Run distance calculation 
+  dist_df <- as.data.frame(st_distance(x, y))
+  
+  ## Tidy up output
+  colnames(dist_df) <- cols
+  dist_df$Census_Block_Group <- rows
+  dist_df <- dist_df %>%
+    gather(rcID, Distance, -Census_Block_Group) %>%
+    mutate(Distance = Distance / 1000) %>%
+    mutate(Distance = gsub("[km]", "", Distance)) %>%
+    mutate(Distance = as.numeric(Distance)) 
+  
+  return(dist_df)
+}
+
+## Function for returning the network distances between two objects - designed for CBGs and Retail Centres
+get_network <- function(rc, cbg) {
+  
+  ## Convert features to centroids
+  rc_cent <- st_centroid(rc)
+  cbg_cent <- st_centroid(cbg)
+  
+  ## Run routing
+  distances <- route_matrix(rc_cent, cbg_cent, routing_mode = "fast", transport_mode = "car")
+  
+  ## Tidy up output
+  distances <- distances %>%
+    select(orig_id, dest_id, distance) %>%
+    mutate(distance = distance / 1000)
+  
+  cbg_cent$dest_id <- rownames(cbg_cent)
+  cbg_ids <- cbg_cent %>% as.data.frame() %>% select(Census_Block_Group, dest_id)
+  rc_cent$orig_id <- rownames(rc_cent)
+  rc_ids <- rc_cent %>% as.data.frame() %>% select(rcID, orig_id)
+  
+  distances <- merge(distances, cbg_ids, by = "dest_id", all.x = TRUE)
+  distances <- merge(distances, rc_ids, by = "orig_id", all.x = TRUE)
+  distances <- distances %>%
+    select(rcID, Census_Block_Group, distance) %>%
+    rename(Distance = distance)
+  return(distances)
+  
+}
+
+## Huff Model Specification - as input we need to have the retail centre ID, and then the different parameters we want to use
+## in the model - attractiveness scores, distances and then alpha & beta values
+get_huff <- function(huff_inputs, alpha = 1, beta = 2) {
+  
+  ## Pull out features we want
+  cl <- huff_inputs %>%
+    select(rcID, Census_Block_Group, attr_score, Distance)
+    
+ ## Numerator 
+ numerator <- cl %>%
+   mutate(numerator = (attr_score ^ alpha) / (Distance ^ beta))
+ 
+ ## Denominator
+ denominator <- numerator %>%
+   group_by(Census_Block_Group) %>%
+   summarise(denominator = sum(numerator))
+ 
+ ## Calculate Huff Probability 
+ huff_probs <- merge(numerator, denominator, by = "Census_Block_Group", all.x = TRUE)
+ huff_probs$huff_probability <- huff_probs$numerator / huff_probs$denominator
+ return(huff_probs)  
+    
+}
+
+
+
+
+
+
+
+
+
+
+
 ## Function for extracting list of census tracts and total visits to each 
 extract_catchments <- function(rc, ptns, state = "AL", geography = "Block") {
   
