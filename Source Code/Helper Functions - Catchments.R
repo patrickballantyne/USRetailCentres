@@ -122,24 +122,20 @@ get_network <- function(rc, cbg) {
   cbg_cent <- st_centroid(cbg)
   
   ## Run routing
-  distances <- route_matrix(rc_cent, cbg_cent, routing_mode = "fast", transport_mode = "car")
+  rc_ls <- split(rc_cent, seq(nrow(rc_cent)))
+  distances <- lapply(rc_ls, function(x) {
+    dist <- route_matrix(x, cbg_cent, routing_mode = "fast", transport_mode = "car")
+    dist$rcID <- x$rcID
+    dist$Census_Block_Group <- cbg_cent$Census_Block_Group
+    dist })
   
-  ## Tidy up output
-  distances <- distances %>%
-    select(orig_id, dest_id, distance) %>%
-    mutate(distance = distance / 1000)
-  
-  cbg_cent$dest_id <- rownames(cbg_cent)
-  cbg_ids <- cbg_cent %>% as.data.frame() %>% select(Census_Block_Group, dest_id)
-  rc_cent$orig_id <- rownames(rc_cent)
-  rc_ids <- rc_cent %>% as.data.frame() %>% select(rcID, orig_id)
-  
-  distances <- merge(distances, cbg_ids, by = "dest_id", all.x = TRUE)
-  distances <- merge(distances, rc_ids, by = "orig_id", all.x = TRUE)
-  distances <- distances %>%
+  dist_df <- do.call(rbind, distances)
+  dist_df <- dist_df %>%
+    as.data.frame() %>%
     select(rcID, Census_Block_Group, distance) %>%
-    rename(Distance = distance)
-  return(distances)
+    rename(Distance = distance) %>%
+    mutate(Distance = Distance / 1000)
+  return(dist_df)
   
 }
 
