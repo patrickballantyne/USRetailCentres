@@ -34,6 +34,103 @@ get_pts <- function(state = "AL") {
   return(pts)
 }
 
+## Function that obtains Huff Probabilities for all Retail Centres in a state
+get_predicted_patronage <- function(state = "AL") {
+  
+  ## First load up the attractiveness scores 
+  attr <- get_attractive(state = state)
+  print("ATTRACTIVENESS SCORES COMPUTED")
+  
+  ## Then compute the distances
+  dist <- get_network(state = state)
+  print("NETWORK DISTANCES COMPUTED")
+  
+  ## Prepare data for Huff model
+  rc <- get_rc(state)
+  rc_out <- rc %>% as.data.frame() %>% select(rcID)
+  rc_out <- merge(rc_out, attr, by = "rcID", all.x = TRUE)
+  rc_out <- merge(rc_out, dist, by = "rcID", all.y = TRUE)
+  
+  ## Run huff model
+  huff <- get_huff(rc_out, alpha = 1, beta = 2)
+  print("HUFF MODEL COMPLETE")
+  return(huff)
+}
+
+## Function that uses SafeGraph patterns to construct 'observed patronage' probabilities
+get_observed_patronage <- function(state = "AL") {
+  
+  ## Pull in patterns for state
+  ptns <- get_patterns(state = state, mydb, week = "july2021")
+  ptns <- ptns %>%
+    as.data.frame() %>%
+    select(placekey, raw_visit_counts, visitor_home_cbgs) %>%
+    mutate_all(na_if, "") 
+  
+  ## Clean out the information about census block groups
+  poi_home_cbgs <- expand_cat_json(ptns,
+                                   expand = "visitor_home_cbgs",
+                                   index = "visitor_home_cbg",
+                                   by = "placekey")
+  
+  ## Pull in list of intersecting places w/ retail centres
+  rc <- get_rc(state = state) 
+  rc <- rc %>% select(rcID)
+  
+  pts <- get_pts(state = state)
+  pts <- pts %>%
+    select(placekey) %>%
+    st_set_crs(4326)
+  
+  int <- st_intersection(pts, rc)
+  int <- int %>%
+    as.data.frame() %>%
+    select(placekey)
+  
+  ## Merge intersection onto patterns
+  ptn_out <- merge(poi_home_cbgs, int, by = "placekey", all.y = TRUE)
+  
+  ## Merge onto census blocks
+  cbg <- st_read("Input Data/Census Block Groups/US_Census_Block_Groups.gpkg")
+  cbg <- cbg %>% rename(Census_Block_Group = CBG_ID) %>% st_transform(32616)
+  cbg_ptn <- merge(cbg, ptn_out, by.x = "Census_Block_Group", by.y = "visitor_home_cbg", all.y = TRUE)
+  
+  ## For each retail centre, identify only those blocks within the 50km radius
+  rc <- rc %>% st_transform(32616)
+  rc_ls <- split(rc, seq(nrow(rc)))
+  main_blocks <- lapply(rc_ls, function(x) {
+    
+    ## Create a buffer for each retail centre (50km)
+    rc_buffer <- st_transform(st_buffer(x, 50000))
+    
+    ## Get blocks in the buffer
+    blocks_sub <- cbg_ptn[rc_buffer, op = st_within]
+    blocks_sub })
+  main_blocks <- do.call(rbind, main_blocks)
+    
+  ## Compute total visits by retail centre & census block group
+  ptn_out_group <- main_blocks %>%
+    group_by(rcID, visitor_home_cbg) %>%
+    summarise(CBG_RC_visits = sum(visitor_home_cbgs)) %>%
+    setNames(c("rcID", "Census_Block_Group", "Total_Visits_RC"))
+  ## Compute total visits by census block group
+  ptn_out_cbg <- main_blocks %>%
+    group_by(visitor_home_cbg) %>%
+    summarise(CBG_visits = sum(visitor_home_cbgs)) %>%
+    setNames(c("Census_Block_Group", "Total_Visits_CBG"))
+  
+  ## Merge counts 
+  cbg_merge <- merge(cbg, ptn_out_group, by = "Census_Block_Group", all.x = TRUE)
+  cbg_merge <- merge(cbg_merge, ptn_out_cbg, by = "Census_Block_Group", all.x = TRUE)
+  return(cbg_merge)
+  
+  
+  
+  
+  
+  
+}
+
 ## Get attractiveness score for a set of retail centres
 get_attractive <- function(state = "AL") {
   
@@ -115,19 +212,36 @@ get_euclidean <- function(x, y) {
 }
 
 ## Function for returning the network distances between two objects - designed for CBGs and Retail Centres
-get_network <- function(rc, cbg) {
+get_network <- function(state = "AL") {
   
-  ## Convert features to centroids
-  rc_cent <- st_centroid(rc)
-  cbg_cent <- st_centroid(cbg)
+  ## Read in the Census Blocks 
+  blocks <- st_transform(st_read("Input Data/Census Block Groups/US_Census_Block_Groups.gpkg"), 32616)
+  blocks <- blocks %>%
+    rename(Census_Block_Group = CBG_ID)
   
-  ## Run routing
-  rc_ls <- split(rc_cent, seq(nrow(rc_cent)))
+  ## Read in the retail centres
+  rc <- get_rc(state = state)
+  rc <- st_transform(rc, 32616)
+  
+  ## Split by retail centre & compute distances 
+  rc_ls <- split(rc, seq(nrow(rc)))
   distances <- lapply(rc_ls, function(x) {
-    dist <- route_matrix(x, cbg_cent, routing_mode = "fast", transport_mode = "car")
+    
+    ## Create a buffer for each retail centre (50km)
+    rc_buffer <- st_transform(st_buffer(x, 50000))
+    
+    ## Get blocks in the buffer
+    blocks_sub <- blocks[rc_buffer, op = st_within]
+    
+    ## Centroids for distances
+    rc_cent <- st_centroid(x)
+    cbg_cent <- st_centroid(blocks_sub)
+    
+    ## Compute distances
+    dist <- route_matrix(rc_cent, cbg_cent, routing_mode = "fast", transport_mode = "car")
     dist$rcID <- x$rcID
     dist$Census_Block_Group <- cbg_cent$Census_Block_Group
-    dist })
+    dist})
   
   dist_df <- do.call(rbind, distances)
   dist_df <- dist_df %>%
@@ -136,7 +250,7 @@ get_network <- function(rc, cbg) {
     rename(Distance = distance) %>%
     mutate(Distance = Distance / 1000)
   return(dist_df)
-  
+
 }
 
 ## Huff Model Specification - as input we need to have the retail centre ID, and then the different parameters we want to use
@@ -145,7 +259,8 @@ get_huff <- function(huff_inputs, alpha = 1, beta = 2) {
   
   ## Pull out features we want
   cl <- huff_inputs %>%
-    select(rcID, Census_Block_Group, attr_score, Distance)
+    select(rcID, Census_Block_Group, attr_score, Distance) %>%
+    mutate(Distance = ifelse(Distance == 0, 0.01, Distance))
     
  ## Numerator 
  numerator <- cl %>%
@@ -159,11 +274,49 @@ get_huff <- function(huff_inputs, alpha = 1, beta = 2) {
  ## Calculate Huff Probability 
  huff_probs <- merge(numerator, denominator, by = "Census_Block_Group", all.x = TRUE)
  huff_probs$huff_probability <- huff_probs$numerator / huff_probs$denominator
+ huff_probs$alpha <- alpha
+ huff_probs$beta
  return(huff_probs)  
     
 }
 
-
+## Function that iterates through a list of values
+huff_experiment <- function(huff_inputs) {
+  
+  ## Pull out features we want
+  cl <- huff_inputs %>%
+    select(rcID, Census_Block_Group, attr_score, Distance) %>%
+    mutate(Distance = ifelse(Distance == 0, 0.01, Distance))
+  
+  ## Create the parameters we want to use
+  
+  ### Set alpha & beta range
+  alpha_ls <- c(0.1, 0.5, 1.0, 2.0, 5.0)
+  beta_ls <- c(0.1, 0.5, 1.0, 2.0, 5.0)
+  
+  ### Convert to format that fits lapply
+  params <- expand.grid(alpha_ls, beta_ls)
+  params <- params %>%
+    setNames(c("alpha", "beta"))
+  params <- split(params, seq(nrow(params)))
+  
+  ## Numerator 
+  test <- lapply(params, function(o) {
+    numerator <- cl %>%
+      mutate(numerator = (attr_score ^ o$alpha) / (Distance ^ o$beta))
+    denominator <- numerator %>%
+      group_by(Census_Block_Group) %>%
+      summarise(denominator = sum(numerator))
+    huff_probs <- merge(numerator, denominator, by = "Census_Block_Group", all.x = TRUE)
+    huff_probs$huff_probability <- huff_probs$numerator / huff_probs$denominator
+    huff_probs$alpha <- o$alpha
+    huff_probs$beta <- o$beta
+    huff_probs
+  })
+  
+  out_df <- do.call(rbind, test)
+  
+}
 
 
 

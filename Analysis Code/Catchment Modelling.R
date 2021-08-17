@@ -5,28 +5,22 @@ library(tidyverse)
 library(tmap)
 library(hereR)
 library(SafeGraphR)
-
 source("Source Code/Helper Functions - Catchments.R")
 options(connectionObserver = NULL)
 mydb <- dbConnect(duckdb::duckdb(), "Output Data/Patterns/Patterns.duckdb")
 options(scipen = 999)
 tempdir()
-dir.create(tempdir())]
+dir.create(tempdir())
 tmap_mode("view")
 set_key("5zgYrNtYojJ0DPRRAnufXo_dLijIAav_a6-3j-bg768")
 
 ## Read in the retail centres for a state
-rc <- get_rc("NE")
-rc_out <- rc %>%
-  as.data.frame() %>%
-  select(rcID, N.pts)
+rc <- get_rc("NM")
 
-# ## Get the patterns 
-# ptns <- get_patterns("ME", mydb, "july2021")
-# 
-# ## Get points
-# pts <- get_pts("ME")
-# pts <- pts %>% select(top_category, sub_category) %>% st_set_crs(4326)
+## Pull in Census Block Groups
+cbg <- st_read("Input Data/Census Block Groups/US_Census_Block_Groups.gpkg")
+cbg <- cbg %>%
+  rename(Census_Block_Group = CBG_ID)
 
 # 1. Create an attractiveness indicator -----------------------------------
 
@@ -35,35 +29,109 @@ rc_out <- rc %>%
 ### 3) TOTAL VISITS
 
 ## Get attractiveness scores for ME centres
-attr <- get_attractive("NE")
+attr <- get_attractive("NM")
 
 # 2. Euclidean Distances (CBG -> Retail Centre) -------------------------------------
 
-## Get the Census Blocks
-cbg <- tigris::block_groups("NE")
-cbg <- cbg %>%
-  select(GEOID) %>%
-  rename(Census_Block_Group = GEOID) %>%
-  st_transform(4326)
-
-## Retail Centres
-get_rc("ME")
-
-## Calculate euclidean distances between all Census Blocks and Retail Centres
-euc <- get_euclidean(rc, cbg)
-
-
+# ## Get the Census Blocks
+# cbg <- tigris::block_groups("NE")
+# cbg <- cbg %>%
+#   select(GEOID) %>%
+#   rename(Census_Block_Group = GEOID) %>%
+#   st_transform(4326)
+# 
+# ## Retail Centres
+# get_rc("ME")
+# 
+# ## Calculate euclidean distances between all Census Blocks and Retail Centres
+# euc <- get_euclidean(rc, cbg)
 
 # 3. Network Distances ----------------------------------------------------
 
-## Use HereR to calculate routes between them 
-dist <- get_network(rc, cbg)
+## Get network distances for all census block groups within a 50km radius of the centre
+dist <- get_network(rc_sub, state = "NM")
 
 ## Attach to the Census Blocks to check they're correct
-cbg_dist <- merge(cbg, dist, by = "Census_Block_Group", all.y = TRUE)
+#cbg_dist <- merge(cbg, dist, by = "Census_Block_Group", all.y = TRUE)
 
 
-# 4. Parameter Calibration  -----------------------------------------------
+# 4. Huff Modelling (Predicted Behaviour)  -----------------------------------------------
+
+## Pull data in together
+rc_out <- rc %>%
+  as.data.frame() %>%
+  select(-c(geom)) %>%
+  select(rcID)
+rc_out <- merge(rc_out, attr, by = "rcID")
+rc_out <- merge(rc_out, dist, by = "rcID", all.y= TRUE)
+
+## Run once you have all distances/attractiveness data- static alpha & beta
+huff_static <- get_huff(rc_out, alpha = 1, beta = 2)
+
+## Run huff model with varying params
+huff_flexi <- huff_experiment(huff_static)
+
+## DO NOT USE!!!
+### Run all functions together
+#huff_together <- get_predicted_patronage("NM")
+
+# 5. Observed Patronage -------------------------------------------------------
+
+## Get the observed patronage - based on SafeGraph patterns
+test <- get_observed_patronage("NM")
+
+
+## Pull in patterns for state
+ptns <- get_patterns(state = "AK", mydb, week = "july2021")
+ptns <- ptns %>%
+  as.data.frame() %>%
+  select(placekey, raw_visit_counts, visitor_home_cbgs) %>%
+  mutate_all(na_if, "") 
+
+## Clean out the information about census block groups
+poi_home_cbgs <- expand_cat_json(ptns,
+                                 expand = "visitor_home_cbgs",
+                                 index = "visitor_home_cbg",
+                                 by = "placekey")
+
+## Pull in list of intersecting places w/ retail centres
+rc <- get_rc(state = "AK") 
+rc <- rc %>% select(rcID)
+
+pts <- get_pts(state = "AK")
+pts <- pts %>%
+  select(placekey) %>%
+  st_set_crs(4326)
+
+int <- st_intersection(pts, rc)
+int <- int %>%
+  as.data.frame() %>%
+  select(placekey)
+
+## Merge intersection onto patterns
+ptn_out <- merge(poi_home_cbgs, int, by = "placekey", all.y = TRUE)
+
+## Merge onto census blocks
+cbg <- st_read("Input Data/Census Block Groups/US_Census_Block_Groups.gpkg")
+cbg <- cbg %>% rename(Census_Block_Group = CBG_ID) %>% st_transform(32616)
+cbg_ptn <- merge(cbg, ptn_out, by.x = "Census_Block_Group", by.y = "visitor_home_cbg", all.y = TRUE)
+
+## For each retail centre, identify only those blocks within the 50km radius
+rc <- rc %>% st_transform(32616)
+rc_ls <- split(rc, seq(nrow(rc)))
+main_blocks <- lapply(rc_ls, function(x) {
+  
+  ## Create a buffer for each retail centre (50km)
+  rc_buffer <- st_transform(st_buffer(x, 50000))
+  
+  ## Get blocks in the buffer
+  blocks_sub <- cbg_ptn[rc_buffer, op = st_within]
+  blocks_sub })
+main_blocks <- do.call(rbind, main_blocks)
+head(main_blocks)
+
+
+
 
 ## Get the patterns
 ne_ptns <- get_patterns("NE", mydb, "july2021")
@@ -116,35 +184,6 @@ tm_shape(calib) +
   tm_fill(col = "Prop_Visits_RC")
 
 st_write(calib, "calib.gpkg")
-
-
-# 5. Huff Modelling -------------------------------------------------------
-
-## Merge datasets together
-rc_out <- rc
-rc_out <- merge(rc_out, dist, by = "rcID", all.y = TRUE)
-rc_out <- merge(rc_out, attr, by = "rcID", all.x = TRUE)
-
-
-## Prepare for experimentation on huff model
-huff_input <- rc_out %>% 
-  as.data.frame() %>%
-  select(rcID, Census_Block_Group, attr_score, Distance) %>%
-  mutate(Distance = ifelse(Distance == 0, 0.01, Distance))
-
-## Run huff model
-huff_probs <- get_huff(huff_input, 1 , 2)
-summary(huff_probs)
-## Merge onto shapefile
-huff_cbg <- merge(cbg, huff_probs, by = "Census_Block_Group", all.y = TRUE)
-
-head(rc)
-## Extract subset
-subset <- huff_cbg %>%
-  filter(rcID == "31_055_RC_3" | rcID == "31_157_RC_49" | rcID == "31_101_RC_50" | rcID == "31_079_RC_4")
-st_write(subset, "huff.gpkg")
-
-
 
 
 # 6. RSME and Pearson's R -------------------------------------------------
