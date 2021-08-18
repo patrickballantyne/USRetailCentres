@@ -4,6 +4,7 @@ library(sf)
 library(tidyverse)
 library(tmap)
 library(hereR)
+library(DBI)
 library(SafeGraphR)
 source("Source Code/Helper Functions - Catchments.R")
 options(connectionObserver = NULL)
@@ -69,11 +70,11 @@ rc_out <- merge(rc_out, dist, by = "rcID", all.y= TRUE)
 huff_static <- get_huff(rc_out, alpha = 1, beta = 2)
 
 ## Run huff model with varying params
-huff_flexi <- huff_experiment(huff_static)
+# huff_flexi <- huff_experiment(huff_static)
 
 ## DO NOT USE!!!
 ### Run all functions together
-#huff_together <- get_predicted_patronage("NM")
+huff_together <- get_predicted_patronage("AK")
 
 # 5. Observed Patronage -------------------------------------------------------
 
@@ -106,10 +107,87 @@ pts <- pts %>%
 int <- st_intersection(pts, rc)
 int <- int %>%
   as.data.frame() %>%
-  select(placekey)
+  select(placekey, rcID)
 
 ## Merge intersection onto patterns
 ptn_out <- merge(poi_home_cbgs, int, by = "placekey", all.y = TRUE)
+
+## Compute totals per 
+test_g <- ptn_out %>%
+  group_by(rcID, visitor_home_cbg) %>%
+  summarise(CBG_RC_visits = sum(visitor_home_cbgs)) %>%
+  setNames(c("rcID", "Census_Block_Group", "Total_Visits_RC"))
+test_cbg <- ptn_out %>%
+  group_by(visitor_home_cbg) %>%
+  summarise(CBG_visits = sum(visitor_home_cbgs)) %>%
+  setNames(c("Census_Block_Group", "Total_Visits_CBG"))
+
+## Merge on 
+cbg_merge <- merge(cbg, test_g, by = "Census_Block_Group", all.x = TRUE)
+cbg_merge <- merge(cbg_merge, test_cbg, by = "Census_Block_Group", all.x = TRUE)
+cbg_merge <- cbg_merge %>%
+  select(Census_Block_Group, rcID, Total_Visits_CBG, Total_Visits_RC) %>%
+  mutate(Prop_Visits_RC = (Total_Visits_RC / Total_Visits_CBG) * 100) %>%
+  select(Census_Block_Group, rcID, Total_Visits_CBG, Total_Visits_RC, Prop_Visits_RC) %>%
+  mutate_if(is.character, as.factor)
+
+
+test <- cbg_merge %>%
+  as.data.frame() %>%
+  select(-c(geometry)) %>%
+  filter(rcID == "02_020_RC_6")
+
+
+huff_sub <- huff_together %>%
+  filter(rcID == "02_020_RC_6")
+
+
+cbg_test <- merge(cbg, huff_sub, by = "Census_Block_Group", all.y = TRUE)
+cbg_test <- merge(cbg_test, test, by = "Census_Block_Group", all.x = TRUE)
+cbg_test <- cbg_test %>%
+  select(Census_Block_Group, rcID.x, Prop_Visits_RC, huff_probability) %>%
+  rename(rcID = rcID.x, observed_probability = Prop_Visits_RC, predicted_probability = huff_probability) %>%
+  mutate(observed_probability = replace_na(observed_probability, 0))
+cbg_test$observed_probability <- scales::rescale(cbg_test$observed_probability, to = c(0, 1))
+
+
+rmse <- sqrt(mean((cbg_test$observed_probability - cbg_test$predicted_probability)^2))
+pearson <- cor.test(cbg_test$observed_probability, cbg_test$predicted_probability,
+                    method = "pearson")
+pearson
+
+
+# 6. RSME and Pearson's R -------------------------------------------------
+
+## Join observed and modelled together
+calib <- calib %>%
+  as.data.frame() %>%
+  select(rcID, Census_Block_Group, Prop_Visits_RC)
+cbg_stat <- subset %>%
+  select(rcID, Census_Block_Group, huff_probability) %>%
+  rename(Model_Huff_Probability = huff_probability)
+cbg_stat <- merge(cbg_stat, calib, by = c("Census_Block_Group", "rcID"), all.x = TRUE)
+cbg_stat <- cbg_stat %>%
+  rename(Observed_Huff_Probability = Prop_Visits_RC) %>%
+  mutate(Observed_Huff_Probability = replace_na(Observed_Huff_Probability, 0))
+cbg_stat$Observed_Huff_Probability <- scales::rescale(cbg_stat$Observed_Huff_Probability, to = c(0, 1))
+
+
+## Compute RMSE
+rmse <- sqrt(mean((cbg_stat$Observed_Huff_Probability - cbg_stat$Model_Huff_Probability)^2))
+
+## Compute Pearson's R
+pearson <- cor.test(cbg_stat$Observed_Huff_Probability, cbg_stat$Model_Huff_Probability,
+                    method = "pearson")
+pearson
+
+
+
+
+
+
+###################################
+## old code - observed patterns w/ buffers
 
 ## Merge onto census blocks
 cbg <- st_read("Input Data/Census Block Groups/US_Census_Block_Groups.gpkg")
@@ -125,13 +203,33 @@ main_blocks <- lapply(rc_ls, function(x) {
   rc_buffer <- st_transform(st_buffer(x, 50000))
   
   ## Get blocks in the buffer
-  blocks_sub <- cbg_ptn[rc_buffer, op = st_within]
+  blocks_sub <- st_intersection(cbg_ptn, rc_buffer)
   blocks_sub })
 main_blocks <- do.call(rbind, main_blocks)
-head(main_blocks)
+
+## Compute total visits by retail centre & census block group
+ptn_out_group <- main_blocks %>%
+  as.data.frame() %>%
+  select(rcID, Census_Block_Group, visitor_home_cbgs) %>%
+  group_by(rcID, Census_Block_Group) %>%
+  summarise(CBG_RC_visits = sum(visitor_home_cbgs)) %>%
+  setNames(c("rcID", "Census_Block_Group", "Total_Visits_RC"))
+## Compute total visits by census block group
+ptn_out_cbg <- main_blocks %>%
+  as.data.frame() %>%
+  select(Census_Block_Group, visitor_home_cbgs) %>%
+  group_by(Census_Block_Group) %>%
+  summarise(CBG_visits = sum(visitor_home_cbgs)) %>%
+  setNames(c("Census_Block_Group", "Total_Visits_CBG"))
 
 
+cbg_merge <- merge(cbg, ptn_out_group, by = "Census_Block_Group", all.y = TRUE)
+cbg_merge <- merge(cbg_merge, ptn_out_cbg, by = "Census_Block_Group", all.x = TRUE)
+cbg_merge <- cbg_merge %>%
+  mutate(prop_visits = (Total_Visits_RC / Total_Visits_CBG) * 100) %>%
+  arrange(rcID)
 
+head(cbg_merge)
 
 ## Get the patterns
 ne_ptns <- get_patterns("NE", mydb, "july2021")
@@ -185,27 +283,3 @@ tm_shape(calib) +
 
 st_write(calib, "calib.gpkg")
 
-
-# 6. RSME and Pearson's R -------------------------------------------------
-
-## Join observed and modelled together
-calib <- calib %>%
-  as.data.frame() %>%
-  select(rcID, Census_Block_Group, Prop_Visits_RC)
-cbg_stat <- subset %>%
-  select(rcID, Census_Block_Group, huff_probability) %>%
-  rename(Model_Huff_Probability = huff_probability)
-cbg_stat <- merge(cbg_stat, calib, by = c("Census_Block_Group", "rcID"), all.x = TRUE)
-cbg_stat <- cbg_stat %>%
-  rename(Observed_Huff_Probability = Prop_Visits_RC) %>%
-  mutate(Observed_Huff_Probability = replace_na(Observed_Huff_Probability, 0))
-cbg_stat$Observed_Huff_Probability <- scales::rescale(cbg_stat$Observed_Huff_Probability, to = c(0, 1))
-
-
-## Compute RMSE
-rmse <- sqrt(mean((cbg_stat$Observed_Huff_Probability - cbg_stat$Model_Huff_Probability)^2))
-
-## Compute Pearson's R
-pearson <- cor.test(cbg_stat$Observed_Huff_Probability, cbg_stat$Model_Huff_Probability,
-                    method = "pearson")
-pearson

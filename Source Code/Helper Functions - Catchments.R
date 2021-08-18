@@ -90,38 +90,71 @@ get_observed_patronage <- function(state = "AL") {
   ## Merge intersection onto patterns
   ptn_out <- merge(poi_home_cbgs, int, by = "placekey", all.y = TRUE)
   
-  ## Merge onto census blocks
-  cbg <- st_read("Input Data/Census Block Groups/US_Census_Block_Groups.gpkg")
-  cbg <- cbg %>% rename(Census_Block_Group = CBG_ID) %>% st_transform(32616)
-  cbg_ptn <- merge(cbg, ptn_out, by.x = "Census_Block_Group", by.y = "visitor_home_cbg", all.y = TRUE)
-  
-  ## For each retail centre, identify only those blocks within the 50km radius
-  rc <- rc %>% st_transform(32616)
-  rc_ls <- split(rc, seq(nrow(rc)))
-  main_blocks <- lapply(rc_ls, function(x) {
-    
-    ## Create a buffer for each retail centre (50km)
-    rc_buffer <- st_transform(st_buffer(x, 50000))
-    
-    ## Get blocks in the buffer
-    blocks_sub <- cbg_ptn[rc_buffer, op = st_within]
-    blocks_sub })
-  main_blocks <- do.call(rbind, main_blocks)
-    
-  ## Compute total visits by retail centre & census block group
-  ptn_out_group <- main_blocks %>%
+  ## Compute totals per RC and RC/CBG
+  test_g <- ptn_out %>%
     group_by(rcID, visitor_home_cbg) %>%
     summarise(CBG_RC_visits = sum(visitor_home_cbgs)) %>%
     setNames(c("rcID", "Census_Block_Group", "Total_Visits_RC"))
-  ## Compute total visits by census block group
-  ptn_out_cbg <- main_blocks %>%
+  test_cbg <- ptn_out %>%
     group_by(visitor_home_cbg) %>%
     summarise(CBG_visits = sum(visitor_home_cbgs)) %>%
     setNames(c("Census_Block_Group", "Total_Visits_CBG"))
   
-  ## Merge counts 
-  cbg_merge <- merge(cbg, ptn_out_group, by = "Census_Block_Group", all.x = TRUE)
-  cbg_merge <- merge(cbg_merge, ptn_out_cbg, by = "Census_Block_Group", all.x = TRUE)
+  ## Merge onto the Census Blocks
+  cbg <- st_read("Input Data/Census Block Groups/US_Census_Block_Groups.gpkg")
+  cbg <- cbg %>%
+    select(CBG_ID) %>%
+    rename(Census_Block_Group = CBG_ID)
+  
+  cbg_merge <- merge(cbg, test_g, by = "Census_Block_Group", all.x = TRUE)
+  cbg_merge <- merge(cbg_merge, test_cbg)
+  cbg_merge <- cbg_merge %>%
+    select(Census_Block_Group, rcID, CBG_Visits, CBG_RC_Visits) %>%
+    mutate(Prop_Visits = (CBG_RC_Visits / CBG_Visits) * 100) %>%
+    select(Census_Block_Group, rcID, CBG_Visits, CBG_RC_Visits, Prop_Visits) %>%
+    mutate_if(is.character, as.factor)
+  
+  # ## Merge on 
+  # cbg_merge <- merge(cbg, test_g, by = "Census_Block_Group", all.x = TRUE)
+  # cbg_merge <- merge(cbg_merge, test_cbg, by = "Census_Block_Group", all.x = TRUE)
+  # cbg_merge <- cbg_merge %>%
+  #   select(Census_Block_Group, rcID, Total_Visits_CBG, Total_Visits_RC) %>%
+  #   mutate(Prop_Visits_RC = (Total_Visits_RC / Total_Visits_CBG) * 100) %>%
+  #   select(Census_Block_Group, rcID, Total_Visits_CBG, Total_Visits_RC, Prop_Visits_RC) %>%
+  #   mutate_if(is.character, as.factor)
+  # 
+  # ## Merge onto census blocks
+  # cbg <- st_read("Input Data/Census Block Groups/US_Census_Block_Groups.gpkg")
+  # cbg <- cbg %>% rename(Census_Block_Group = CBG_ID) %>% st_transform(32616)
+  # cbg_ptn <- merge(cbg, ptn_out, by.x = "Census_Block_Group", by.y = "visitor_home_cbg", all.y = TRUE)
+  # 
+  # ## For each retail centre, identify only those blocks within the 50km radius
+  # rc <- rc %>% st_transform(32616)
+  # rc_ls <- split(rc, seq(nrow(rc)))
+  # main_blocks <- lapply(rc_ls, function(x) {
+  #   
+  #   ## Create a buffer for each retail centre (50km)
+  #   rc_buffer <- st_transform(st_buffer(x, 50000))
+  #   
+  #   ## Get blocks in the buffer
+  #   blocks_sub <- cbg_ptn[rc_buffer, op = st_within]
+  #   blocks_sub })
+  # main_blocks <- do.call(rbind, main_blocks)
+  #   
+  # ## Compute total visits by retail centre & census block group
+  # ptn_out_group <- main_blocks %>%
+  #   group_by(rcID, visitor_home_cbg) %>%
+  #   summarise(CBG_RC_visits = sum(visitor_home_cbgs)) %>%
+  #   setNames(c("rcID", "Census_Block_Group", "Total_Visits_RC"))
+  # ## Compute total visits by census block group
+  # ptn_out_cbg <- main_blocks %>%
+  #   group_by(visitor_home_cbg) %>%
+  #   summarise(CBG_visits = sum(visitor_home_cbgs)) %>%
+  #   setNames(c("Census_Block_Group", "Total_Visits_CBG"))
+  # 
+  # ## Merge counts 
+  # cbg_merge <- merge(cbg, ptn_out_group, by = "Census_Block_Group", all.x = TRUE)
+  # cbg_merge <- merge(cbg_merge, ptn_out_cbg, by = "Census_Block_Group", all.x = TRUE)
   return(cbg_merge)
   
   
@@ -275,7 +308,7 @@ get_huff <- function(huff_inputs, alpha = 1, beta = 2) {
  huff_probs <- merge(numerator, denominator, by = "Census_Block_Group", all.x = TRUE)
  huff_probs$huff_probability <- huff_probs$numerator / huff_probs$denominator
  huff_probs$alpha <- alpha
- huff_probs$beta
+ huff_probs$beta <- beta
  return(huff_probs)  
     
 }
