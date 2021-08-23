@@ -1,26 +1,63 @@
 ## Helper Functions (2) - Retail Centre Typology
 
 
+# ## Function that reads in SafeGraph retail points for a state of interest
+# read_points <- function(state = "AL") {
+#   
+#   ## Read in the points for the selected state
+#   query <- paste0("select* from SafeGraph_Retail_Places_US where region = '", state, "'")
+#   pts <- st_read("Output Data/SafeGraph_Retail_Places_US.gpkg", query = query)
+#   pts <- st_transform(pts, 4326)
+#   return(pts)
+# }
+# 
+# ## Function that reads in the points for NE 
+# read_region_points <- function(region = "NE") {
+#   
+#   ## Lapply function on states within the region 
+#   ls <- c("CT", "DC", "DE", "MA", "MD", "ME", "NH", "NJ", "NY", "PA", "RI", "VT")
+#   ls_pts <- lapply(ls, read_points)
+#   ls_pts <- do.call(rbind, ls_pts)
+#   return(ls_pts)
+#   
+# }
+
+## Get retail centres
+get_rc <- function(state = "AL") {
+  
+  rc_query <- paste0("select* from US_RC_minPts50 where State = '", state, "'") 
+  rc <- st_read("Output Data/Retail Centres/US Retail Centres/US_RC_minPts50.gpkg", query = rc_query)
+  return(rc)
+}
+
 ## Function that reads in SafeGraph retail points for a state of interest
-read_points <- function(state = "AL") {
+get_pts <- function(state = "AL") {
   
   ## Read in the points for the selected state
-  query <- paste0("select* from SafeGraph_Retail_Places_US where region = '", state, "'")
-  pts <- st_read("Output Data/SafeGraph_Retail_Places_US.gpkg", query = query)
-  pts <- st_transform(pts, 4326)
+  query <- paste0("select* from SafeGraph_Cleaned_Places_US where region = '", state, "'")
+  pts <- st_read("Output Data/SafeGraph_Cleaned_Places_US.gpkg", query = query)
   return(pts)
 }
 
-## Function that reads in the points for NE 
-read_region_points <- function(region = "NE") {
+## Function for pulling in the patterns for a state
+get_patterns <- function(state = "AL", duckdb = mydb, week = "july2021") {
   
-  ## Lapply function on states within the region 
-  ls <- c("CT", "DC", "DE", "MA", "MD", "ME", "NH", "NJ", "NY", "PA", "RI", "VT")
-  ls_pts <- lapply(ls, read_points)
-  ls_pts <- do.call(rbind, ls_pts)
-  return(ls_pts)
+  ## Read in the patterns from the duck database
+  ptns <- dbGetQuery(mydb, paste0("SELECT * FROM", " ", week, " ", " WHERE region = '", state, "'"))
+  print("PATTERNS EXTRACTED")
   
+  ## Read in the points to match 
+  pts_query <- paste0("select* from SafeGraph_Cleaned_Places_US where region = '", state, "'") 
+  pts <- st_read("Output Data/SafeGraph_Cleaned_Places_US.gpkg", query = pts_query)
+  pts <- pts %>% select(placekey)
+  print("POINTS EXTRACTED")
+  
+  ## Merge
+  ptns_sf <- merge(pts, ptns, by = "placekey", all.x = TRUE)
+  print(paste0(week, "PATTERNS CLEANED"))
+  return(ptns_sf)
 }
+
 
 ## Region State Lists
 ne <- c("CT", "ME", "MA", "NH", "NJ", "NY", "PA", "RI", "VT")
@@ -53,122 +90,350 @@ subset_centres <- function(min_pts = 100) {
 
 
 ## Function that extracts all the variables needed to run the typology for the retail centres
-prep4typology <- function(state) {
+prep4typology <- function(state, patterns) {
   
   ## Read in the datasets we need for this
-  boundaries <- st_read(paste0("Output Data/Retail Centres/", state, "_RC_Boundaries.gpkg"))
-  hexes <- st_read(paste0("Output Data/Retail Centres/", state, "_RC_Hexes.gpkg"))
-  pts <- read_points(state = state)
+  boundaries <- get_rc(state)
+  pts <- get_pts(state = state)
   bdgs <- st_read(paste0("Output Data/Buildings/", state, "_Retail_Buildings.gpkg"))
   
-  ## Drop out the retail centres with < 20 pts
-  boundaries <- boundaries %>% filter(n.pts >= 20)
-  hexes <- hexes %>% filter(rcID %in% boundaries$rcID)
+  ## Merge on the new aggregations
+  ldc <- data.table::fread("Output Data/SafeGraph_Places_Categories_LDC.csv")
+  pts <- merge(pts, ldc, by = c("top_category", "sub_category"))
+
+  ## Merge
+  rc_grouped <- boundaries %>%
+    as.data.frame() %>%
+    select(rcID, rcName, State, N.pts) %>%
+    rename(n.units = N.pts)
   
   ## 1. n.features & area ########################
-  boundaries <- boundaries %>%
-    dplyr::rename(n.units = n.pts)
-  
-  ## Count number of H3 hexes
-  hex_count <- st_intersection(boundaries, hexes)
-  rc_grouped <- hex_count %>%
-    as.data.frame() %>%
-    group_by(rcID, rcName, n.units) %>%
-    dplyr::summarise(n.hexes = n())
-  
+
   ## Count number of Buildings
   bdg_count <- boundaries %>%
     st_join(bdgs) %>%
     as.data.frame() %>%
-    select(rcID, rcName) %>%
-    group_by(rcID, rcName) %>%
+    select(rcID) %>%
+    group_by(rcID) %>%
     dplyr::summarise(n.bdgs = n())
-  rc_grouped <- merge(rc_grouped, bdg_count, by = c("rcID", "rcName"), all.x = TRUE)
+  rc_grouped <- merge(rc_grouped, bdg_count, by = "rcID", all.x = TRUE)
   
   ## Calculate Area
   boundaries$area <- st_area(boundaries)
   
   ## Calculate Retail Building Density
-  densities <- merge(boundaries, bdg_count, by = c("rcID", "rcName"), all.x = TRUE)
+  densities <- merge(boundaries, bdg_count, by = "rcID", all.x = TRUE)
   densities <- densities %>%
     as.data.frame() %>%
-    select(rcID, rcName, n.bdgs, area) %>%
+    select(rcID, n.bdgs, area) %>%
     mutate(bdg_density = n.bdgs/area) %>%
     select(-c(n.bdgs)) %>%
     mutate_at(vars(area, bdg_density), as.numeric)
-  rc_grouped <- merge(rc_grouped, densities, by = c("rcID", "rcName"), all.x = TRUE)
+  rc_grouped <- merge(rc_grouped, densities, by = "rcID", all.x = TRUE)
   
-  ## 2. proportions of comparison, convenience, leisure and service retail ##########################
+  ## 2. Proportions different types of retail ##########################
+  
+  ### Intersect
+  pts <- st_set_crs(pts, 4326)
+  boundaries <- st_transform(boundaries, 4326)
   pt_count <- st_intersection(boundaries, pts)
-  cat_props<- pt_count %>%
-    group_by(rcID, rcName) %>%
-    dplyr::count(ldc_aggregation) %>%
+  
+  
+  ### First, the comparison categories
+  comp_types <- pt_count %>%
     as.data.frame() %>%
     select(-c(geom)) %>%
-    spread(ldc_aggregation, n)  %>%
-    mutate(SERVICES = replace(SERVICES, is.na(SERVICES), 0)) %>%
-    mutate(LEISURE = replace(LEISURE, is.na(LEISURE), 0)) %>%
-    mutate(COMPARISON = replace(COMPARISON, is.na(COMPARISON), 0)) %>%
-    mutate(CONVENIENCE = replace(CONVENIENCE, is.na(CONVENIENCE), 0)) %>%
-    mutate(TOTAL = COMPARISON + CONVENIENCE + SERVICES + LEISURE) %>%
-    mutate(pct_Comparison = (COMPARISON / TOTAL) * 100) %>%
-    mutate(pct_Convenience = (CONVENIENCE / TOTAL) * 100) %>%
-    mutate(pct_Service = (SERVICES / TOTAL) * 100) %>%
-    mutate(pct_Leisure = (LEISURE / TOTAL) * 100) %>%
-    select(-c(TOTAL, COMPARISON, CONVENIENCE, LEISURE, SERVICES))
-  rc_grouped <- merge(rc_grouped, cat_props, by = c("rcID", "rcName"), all.x = TRUE)
+    select(rcID, ldc_aggregation, typology_aggregation) %>%
+    filter(ldc_aggregation == "COMPARISON")  %>%
+    group_by(rcID) %>%
+    count(typology_aggregation) %>%
+    spread(typology_aggregation, n)
+  comp_types <- merge(comp_types, rc_grouped[, c("rcID", "n.units")], all.x = TRUE)
+  comp_types <- comp_types %>%
+    mutate_if(is.numeric, ~replace_na(., 0)) %>%
+    mutate(propClothingandFootwear = (ClothingandFootwear / n.units) * 100,
+           propDIYandHousehold = (DIYandHousehold / n.units) * 100,
+           propElectrical = (Electrical / n.units) * 100,
+           propRecreational = (Recreational / n.units) * 100,
+           propOtherComparison = (OtherComparison / n.units) * 100) %>%
+    select(rcID, propClothingandFootwear, propDIYandHousehold, propElectrical,
+           propRecreational, propOtherComparison)
+  rc_grouped <- merge(rc_grouped, comp_types, by = "rcID", all.x = TRUE)
   
-  ## 3. diversity ########################
+  ## Second the comparison categories
+  conv_types <- pt_count %>%
+    as.data.frame() %>%
+    select(-c(geom)) %>%
+    select(rcID, ldc_aggregation, typology_aggregation) %>%
+    filter(ldc_aggregation == "CONVENIENCE")  %>%
+    group_by(rcID) %>%
+    count(typology_aggregation) %>%
+    spread(typology_aggregation, n)
+  conv_types <- merge(conv_types, rc_grouped[, c("rcID", "n.units")], all.x = TRUE)
+  conv_types <- conv_types %>%
+    mutate_if(is.numeric, ~replace_na(., 0)) %>%
+    mutate(propChemist = (Chemist / n.units) * 100,
+           propCTNandGasoline = (CTNandGasoline / n.units) * 100,
+           propFood = (Food / n.units) * 100,
+           propOffLicence = (OffLicence / n.units) * 100,
+           propOtherConvenience = (OtherConvenience / n.units) * 100) %>%
+    select(rcID, propChemist, propCTNandGasoline, propFood, 
+           propOffLicence, propOtherConvenience)
+  rc_grouped <- merge(rc_grouped, conv_types, by = "rcID", all.x = TRUE)
+  
+  ## Third, the leisure categories
+  leisure_types <- pt_count %>%
+    as.data.frame() %>%
+    select(-c(geom)) %>%
+    select(rcID, ldc_aggregation, typology_aggregation) %>%
+    filter(ldc_aggregation == "LEISURE")  %>%
+    group_by(rcID) %>%
+    count(typology_aggregation) %>%
+    spread(typology_aggregation, n)
+  leisure_types <- merge(leisure_types, rc_grouped[, c("rcID", "n.units")], all.x = TRUE)
+  leisure_types <- leisure_types %>%
+    mutate_if(is.numeric, ~replace_na(., 0)) %>%
+    mutate(propBars= (Bars / n.units) * 100,
+           propRestaurant = (Restaurant / n.units) * 100,
+           propFastFood = (FastFood / n.units) * 100,
+           propEntertainment = (Entertainment / n.units) * 100,
+           propFitness = (Fitness / n.units) * 100,
+           propOtherLeisure = (OtherLeisure / n.units) * 100) %>%
+    select(rcID, propBars, propRestaurant, propFastFood, 
+           propEntertainment, propFitness, propOtherLeisure)
+  rc_grouped <- merge(rc_grouped, leisure_types, by = "rcID", all.x = TRUE)
+  
+  ## Fourth, the service categories
+  service_types <- pt_count %>%
+    as.data.frame() %>%
+    select(-c(geom)) %>%
+    select(rcID, ldc_aggregation, typology_aggregation) %>%
+    filter(ldc_aggregation == "SERVICES")  %>%
+    group_by(rcID) %>%
+    count(typology_aggregation) %>%
+    spread(typology_aggregation, n)
+  service_types <- merge(service_types, rc_grouped[, c("rcID", "n.units")], all.x = TRUE)
+  service_types <- service_types %>%
+    mutate_if(is.numeric, ~replace_na(., 0)) %>%
+    mutate(propConsumerService = (ConsumerService / n.units) * 100,
+           propHouseholdService = (HouseholdService / n.units) * 100,
+           propBusinessService = (BusinessService/ n.units) * 100) %>%
+    select(rcID, propConsumerService, propHouseholdService,
+           propBusinessService)
+  rc_grouped <- merge(rc_grouped, service_types, by = "rcID", all.x = TRUE)
+
+  
+  ## 3. Diversity ########################
+  
+  ## First the Diversity Indexes 
+  ### Count number of distinct categories
   distinct_cats <- pt_count %>%
     as.data.frame() %>%
-    group_by(rcID, rcName) %>%
-    dplyr::summarise(top_category_total = n_distinct(top_category),
-                     sub_category_total = n_distinct(sub_category))
+    select(rcID, top_category, sub_category) %>%
+    group_by(rcID) %>%
+    dplyr::summarise(top_category_total = n_distinct(top_category))
+  
+  ### Compute national diversity index
   ### we know that there are 176 distinct top categories in the US, and 357 distinct sub categories
-  distinct_cat <- distinct_cats %>%
-    mutate(top_category_diversity = (top_category_total / 176)*100, 
-           sub_category_diversity = (sub_category_total / 357)*100) %>%
-    select(rcID, rcName, top_category_diversity, sub_category_diversity)
-  rc_grouped <- merge(rc_grouped, distinct_cat, by = c("rcID", "rcName"), all.x = TRUE)
-  
-  
-  ## 4. chains vs independents #####################
-  chain_or_ind <- data.table::fread("Output Data/Typology/SafeGraph_Retail_Chains_NEW.csv")
-  
-  pt_count <- merge(pt_count, chain_or_ind, by = c("brands", "location_name"), all.x = TRUE)
-  diversity <- pt_count %>%
+  nat_cat <- distinct_cats %>%
+    mutate(nationalCatDiversity = (top_category_total / 176)*100) %>%
+    select(rcID, top_category_total, nationalCatDiversity)
+    
+  ### Compute state diversity index
+  local_cat <- pt_count %>%
     as.data.frame() %>%
-    group_by(rcID, rcName) %>%
-    dplyr::count(new_identifier) %>%
-    spread(new_identifier, n) %>%
-    select("rcID", "rcName", "Independent", "Small Multiple", "National Chain", "Large National Chain") %>%
-    set_names(c("rcID", "rcName", "Independent", "SmallMultiple", "NationalChain", "LargeNationalChain")) %>%
-    replace(is.na(.), 0) %>%
-    mutate(typ_total = Independent + SmallMultiple + NationalChain + LargeNationalChain) %>%
-    mutate(pct_Independent = (Independent / typ_total) * 100) %>%
-    mutate(pct_Small_Multiple = (SmallMultiple / typ_total) * 100) %>%
-    mutate(pct_National_Chain = (NationalChain / typ_total) * 100) %>%
-    mutate(pct_Large_National_Chain = (LargeNationalChain / typ_total) * 100) %>%
-    select(c(rcID, rcName, pct_Independent, pct_Small_Multiple, pct_National_Chain, pct_Large_National_Chain))
-  rc_grouped <- merge(rc_grouped, diversity, by = c("rcID", "rcName"), all.x = TRUE)
+    select(top_category) %>%
+    summarise(local_top_category_total = n_distinct(top_category))
+  
+  ### Bring two together
+  nat_cat$localCatDiversity <- (nat_cat$top_category_total / local_cat$local_top_category_total) * 100
+  nat_cat <- nat_cat %>% select(rcID, nationalCatDiversity, localCatDiversity)
+  rc_grouped <- merge(rc_grouped, nat_cat, by = "rcID", all.x = TRUE)
   
   
-  ## 5. centre compactness ###################
+  ## Next the the proportions of different ownership 
+  
+  ### Popular brands
+  popularbrands <- read.csv("Output Data/Typology/PopularBrands.csv")
+  p_brands <- pt_count %>%
+    as.data.frame() %>%
+    select(-c(geom)) %>%
+    filter(brands %in% popularbrands$brands) %>%
+    group_by(rcID) %>%
+    count() 
+  p_brands <- merge(p_brands, rc_grouped[, c("rcID", "n.units")], all.x = TRUE)
+  p_brands <- p_brands %>%
+    mutate_if(is.numeric, ~replace_na(., 0)) %>%
+    mutate(propPopularBrands = (n / n.units) * 100) %>%
+    select(rcID, propPopularBrands) 
+  rc_grouped <- merge(rc_grouped, p_brands, by = "rcID", all.x = TRUE)
+  rc_grouped <- rc_grouped %>%
+    mutate_if(is.numeric, ~replace_na(., 0))
+  
+  ### Proportions of Independents, Small Multiples and National Chains
+  
+  ## Read in the classification
+  cl_pts <- data.table::fread("Output Data/Typology/OwnershipClassification.csv", header = TRUE)
+  cl_pts <- cl_pts %>%
+    filter(region == state) %>%
+    select(placekey, brand_identifier)
+  
+  ## Merge on
+  pts_recl <- merge(pt_count, cl_pts, by = "placekey", all.x = TRUE)
+  
+  ## Spread and calculate number of independents, small multiples and national chains
+  div_types <- pts_recl %>%
+    as.data.frame() %>%
+    select(-c(geometry)) %>%
+    filter(ldc_aggregation == "COMPARISON" | ldc_aggregation == "CONVENIENCE" | ldc_aggregation == "SERVICE" | ldc_aggregation == "LEISURE") %>%
+    select(rcID, brand_identifier) %>%
+    group_by(rcID) %>%
+    count(brand_identifier) %>%
+    spread(brand_identifier, n)
+  div_types <- merge(div_types, rc_grouped[, c("rcID", "n.units")], all.x = TRUE)
+  div_types <- div_types %>%
+    mutate_if(is.numeric, ~replace_na(., 0)) %>%
+    mutate(propIndependent = (INDEPENDENT / n.units) * 100,
+           propSmallMultiple = (`SMALL MULTIPLE` / n.units) * 100,
+           propNationalChain = (`NATIONAL CHAIN` / n.units) * 100) %>%
+    select(rcID, propIndependent, propSmallMultiple, propNationalChain)
+  rc_grouped <- merge(rc_grouped, div_types, by = "rcID", all.x = TRUE)
+  
+  
+  ## 5. Size and Function Variables ###################
+  
+  ### Compute roeck scroe
   boundaries$area <- st_area(boundaries)
   boundaries_area <- boundaries %>%
-    select(rcID, rcName, area)
+    select(rcID, area)
   circ <- lwgeom::st_minimum_bounding_circle(boundaries_area)
   circ$area <- st_area(circ)
   circ <- circ %>%
     as.data.frame() %>%
-    select(rcID, rcName, area)
-  roeck <- merge(boundaries, circ, by = c("rcID", "rcName"), all.x = TRUE)
+    select(rcID, area)
+  roeck <- merge(boundaries, circ, by = "rcID", all.x = TRUE)
   roeck$roeck <- as.numeric(roeck$area.x / roeck$area.y)
   roeck$roeck <- scales::rescale(roeck$roeck)
   roeck <- roeck %>%
     as.data.frame() %>%
-    select(rcID, rcName, roeck)
-  rc_grouped <- merge(rc_grouped, roeck, by = c("rcID", "rcName"), all.x = TRUE)
+    select(rcID,roeck)
+  rc_grouped <- merge(rc_grouped, roeck, by = "rcID", all.x = TRUE)
+  
+  ### Compute proportion Anchor
+  anchors <-  pt_count %>%
+    as.data.frame() %>%
+    select(-c(geom)) %>%
+    select(rcID, sub_category) %>%
+    filter(sub_category == "Department Stores")  %>%
+    group_by(rcID) %>%
+    count() 
+  anchors <- merge(anchors, rc_grouped[, c("rcID", "n.units")], all.x = TRUE)
+  anchors <- anchors %>% 
+    mutate_if(is.numeric, ~replace_na(., 0)) %>%
+    mutate(propAnchor = (n / n.units) * 100) %>%
+    select(rcID, propAnchor)
+  rc_grouped <- merge(rc_grouped, anchors, by = "rcID", all.x = TRUE)
+  rc_grouped <- rc_grouped %>%
+    mutate_if(is.numeric, ~replace_na(., 0))
+  
+  ### Compute proportion Mass and Value stores
+  discounters <- read.csv("Output Data/Typology/Discounters.csv")
+  present_discounters <- pt_count %>%
+    as.data.frame() %>%
+    select(-c(geom)) %>%
+    filter(brands %in% discounters$brands) %>%
+    group_by(rcID) %>%
+    count() 
+  present_discounters <- merge(present_discounters, rc_grouped[, c("rcID", "n.units")], all.x = TRUE)
+  present_discounters <- present_discounters %>%
+    mutate_if(is.numeric, ~replace_na(., 0)) %>%
+    mutate(propDiscount = (n / n.units) * 100) %>%
+    select(rcID, propDiscount) 
+  rc_grouped <- merge(rc_grouped, present_discounters, by = "rcID", all.x = TRUE)
+  rc_grouped <- rc_grouped %>%
+    mutate_if(is.numeric, ~replace_na(., 0))
+  
+  ## SmartLocation Variables 
+  
+  ### Read in the dataset
+  query <- paste0("select* from SmartLocation where StateName = '", state, "'")
+  sl <- st_read("Input Data/Smart Location/SmartLocation.gpkg", query = query)
+  
+  ## Join data with retail centres
+  sl_rc <- st_join(boundaries, sl)
+  ## Compute variables
+  sl_out <- sl_rc %>%
+    as.data.frame() %>%
+    group_by(rcID) %>%
+    summarise(Median_Res_Density = median(ResidentialDensity), Median_Emp_Density = median(EmploymentDensity),
+              Median_Retail_Emp_Density = median(RetailEmploymentDensity), Median_Road_Density = median(RoadDensity),
+              Median_Distance_to_Transit = median(TransitDistance)) %>%
+    mutate(Median_Distance_to_Transit = case_when(Median_Distance_to_Transit == -99999 ~ 1000,
+                                                  TRUE ~ Median_Distance_to_Transit))
+  rc_grouped <- merge(rc_grouped, sl_out, by = "rcID", all.x = TRUE)
+  
+  
+  ## 6. Economic Performance ##########################
+  
+
+  ### Low Income Population
+  sl_out2 <- sl_rc %>%
+    as.data.frame() %>%
+    group_by(rcID) %>%
+    summarise(Median_LowIncome_Prop = median(LowIncome)) %>%
+    select(rcID, Median_LowIncome_Prop)
+  rc_grouped <- merge(rc_grouped, sl_out2, by = "rcID", all.x = TRUE)
+  
+  ### Tenancy Mix 
+  tenancy_mix <- pt_count %>%
+    as.data.frame() %>%
+    select(-c(geom)) %>%
+    select(rcID, ldc_aggregation) %>%
+    group_by(rcID) %>%
+    count(ldc_aggregation) %>%
+    spread(ldc_aggregation, n)
+  tenancy_mix <- merge(tenancy_mix, rc_grouped[, c("rcID", "n.units")], all.x = TRUE)
+  tenancy_mix <- tenancy_mix %>%
+    mutate_if(is.numeric, ~replace_na(., 0)) %>%
+    mutate(Retail = COMPARISON + CONVENIENCE,
+           PropRetail = (Retail / n.units) * 100,
+           PropService = (SERVICES / n.units) * 100,
+           RetailtoService = PropRetail - PropService) %>%
+    select(rcID, RetailtoService)
+  rc_grouped <- merge(rc_grouped, tenancy_mix, by = "rcID", all.x = TRUE)
+  print(paste0(rc_grouped$State, "Variables Extracted"))
+  return(rc_grouped)
+  
+  ### Patterns Variables
+  # pt_patterns <- merge(pts, patterns, by = "placekey", all.x = TRUE)
+  # 
+  # ## Calculate Retail Centre variables
+  # ptn_int <- st_intersection(boundaries, ptns)
+  # return(ptn_int)
+  
+  
+  
+  # ## Read in Patterns
+  # patterns <- st_read(paste0("E:/SafeGraph Patterns/WEEKLY PATTERNS/2021/STATE PATTERNS/", state, "_RC_Patterns.gpkg"))
+  # patterns <- patterns %>%
+  #   select(safegraph_place_id, parent_safegraph_place_id, 
+  #          raw_visit_counts, raw_visitor_counts, distance_from_home, median_dwell) %>%
+  #   rename(visits = raw_visit_counts, visitors = raw_visitor_counts, distance = distance_from_home, dwell = median_dwell) %>%
+  #   replace(is.na(.), 0) %>%
+  #   st_transform(4326)
+  # 
+  # ## Intersect w/ boundaries
+  # int <- st_intersection(patterns, boundaries)
+  # int_df <- int %>%
+  #   as.data.frame() %>%
+  #   select(rcID, rcName, visits, visitors, distance, dwell) %>%
+  #   group_by(rcID, rcName) %>%
+  #   summarise(total_visits = sum(visits), total_visitors = sum(visitors),
+  #             median_distance = median(distance), median_dwell = median(dwell))
+  # ## Merge
+  # rc_grouped <- merge(rc_grouped, int_df, by = c("rcID", "rcName"), all.x = TRUE)
+  # 
+  
   
   ## 6. geodemographics ######################
   
@@ -260,54 +525,8 @@ prep4typology <- function(state) {
   # ## Merge onto main dataset
   # rc_grouped <- merge(rc_grouped, rc_gd_pop, by = c("rcID", "rcName"), all.x = TRUE)
   
-  
-  ## 7. economic performance
-  
-  # ## Read in Patterns
-  patterns <- st_read(paste0("E:/SafeGraph Patterns/WEEKLY PATTERNS/2021/STATE PATTERNS/", state, "_RC_Patterns.gpkg"))
-  patterns <- patterns %>%
-    select(safegraph_place_id, parent_safegraph_place_id, 
-           raw_visit_counts, raw_visitor_counts, distance_from_home, median_dwell) %>%
-    rename(visits = raw_visit_counts, visitors = raw_visitor_counts, distance = distance_from_home, dwell = median_dwell) %>%
-    replace(is.na(.), 0) %>%
-    st_transform(4326)
-  
-  ## Intersect w/ boundaries
-  int <- st_intersection(patterns, boundaries)
-  int_df <- int %>%
-    as.data.frame() %>%
-    select(rcID, rcName, visits, visitors, distance, dwell) %>%
-    group_by(rcID, rcName) %>%
-    summarise(total_visits = sum(visits), total_visitors = sum(visitors),
-              median_distance = median(distance), median_dwell = median(dwell))
-  ## Merge
-  rc_grouped <- merge(rc_grouped, int_df, by = c("rcID", "rcName"), all.x = TRUE)
-  
 
-  # 8. urban morphology -----------------------------------------------------
-  
-  # Read in the Smart Location data for the NorthEast
-  query <- paste0("select* from US_SmartLocation_2017 where State_Name = '", state, "'")
-  sl <- st_read("Input Data/Smart Location/US_SmartLocation_2017.gpkg", query = query)
 
-  ## Join data with retail centres
-  sl_rc <- st_join(boundaries, sl)
-
-  ## Compute variables
-  sl_out <- sl_rc %>%
-    as.data.frame() %>%
-    group_by(rcID, rcName) %>%
-    select(-c(State_Code.x)) %>%
-    rename(State_Code = State_Code.y) %>%
-    summarise(Total_Housing_Units = sum(Housing_Count), Median_Res_Density = median(Residential_Density), Median_Emp_Density = median(Employment_Density),
-              Median_Retail_Emp_Density = median(Retail_Employment_Density), Median_Road_Density = median(Road_Density),
-              Median_Distance_to_Transit = median(Distance_to_Transit))
-
-  ## Join
-  rc_grouped <- merge(rc_grouped, sl_out, by = c("rcID", "rcName"))
-  return(rc_grouped)
-  
-  
   ## 9. return ######################
   
   ## Merge dataframe onto retail centre boundaries

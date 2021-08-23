@@ -351,7 +351,30 @@ huff_experiment <- function(huff_inputs) {
   
 }
 
-
+## Function that splits the different iterations of huff (a & b vals) and merges them onto the main dataset
+clean_huff_experiment <- function(huff_experiment, observed_probs) {
+  
+  ## Get out variables we want
+  huff_experiment <- huff_experiment %>%
+    select(Census_Block_Group, rcID, huff_probability, alpha, beta) %>%
+    rename(Predicted_Probability = huff_probability)
+  
+  ## Iterate through each set of values (unique alphas & betas) and perform join
+  he_ls <- split(huff_experiment, list(huff_experiment$alpha, huff_experiment$beta))
+  join <- lapply(huff_experiment, function(n) {
+    
+    ## Join onto CBGs
+    cbg_join <- merge(cbg, n, by = "Census_Block_Group", all.y = TRUE)
+    
+    ## Join on the observed probabilities
+    cbg_join <- merge(cbg_join, observed_probs, by = "Census_Block_Group", all.x = TRUE)
+    
+    ## Correlating the two
+    p <- cor.test(cbg_join$Observed_Huff_Probability, cbg_stat$Predicted_Probability,
+                  method = "pearson")
+  })
+  
+}
 
 
 
