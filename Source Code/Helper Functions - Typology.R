@@ -98,7 +98,7 @@ prep4typology <- function(state, patterns) {
   bdgs <- st_read(paste0("Output Data/Buildings/", state, "_Retail_Buildings.gpkg"))
   
   ## Merge on the new aggregations
-  ldc <- data.table::fread("Output Data/SafeGraph_Places_Categories_LDC.csv")
+  ldc <- data.table::fread("Output Data/SafeGraph_Places_Categories_LDC.csv", header = TRUE)
   pts <- merge(pts, ldc, by = c("top_category", "sub_category"))
 
   ## Merge
@@ -137,6 +137,7 @@ prep4typology <- function(state, patterns) {
   pts <- st_set_crs(pts, 4326)
   boundaries <- st_transform(boundaries, 4326)
   pt_count <- st_intersection(boundaries, pts)
+  return(pt_count)
   
   
   ### First, the comparison categories
@@ -401,7 +402,7 @@ prep4typology <- function(state, patterns) {
            RetailtoService = PropRetail - PropService) %>%
     select(rcID, RetailtoService)
   rc_grouped <- merge(rc_grouped, tenancy_mix, by = "rcID", all.x = TRUE)
-  print(paste0(rc_grouped$State, "Variables Extracted"))
+  print(paste0(State, "", "Variables Extracted"))
   return(rc_grouped)
   
   ### Patterns Variables
