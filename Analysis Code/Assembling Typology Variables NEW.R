@@ -10,18 +10,30 @@ source("Source Code/Helper Functions - Typology.R")
 tempdir()
 dir.create(tempdir())
 
-## Read in the pattern
+## Read in the patterns
 pats <- fread("Output Data/Patterns/july_2021_patterns.csv")
 
-## Test it 
-state_list <- c("DC")
-out_ls <- lapply(state_list, prep4typology, patterns = pats)
+## Get variables
 
-exce## Rbind and write out
-out_df <- do.call(rbind, out_ls)
-write.csv(out_df, "Output Data/Typology/US_Typology_Variables_minPts100.csv")
+### North-East
+ne_out <- lapply(ne, prep4typology, patterns = pats)
+ne_out_df <- do.call(rbind, ne_out)
 
-### Test on one state - for troubleshooting
-n <- prep4typology("MT", pats)
+### South
+s_out <- lapply(s, prep4typology, patterns = pats)
+s_out_df <- do.call(rbind, s_out)
+
+### West
+w_out <- lapply(w, prep4typology, patterns = pats)
+w_out_df <- do.call(rbind, w_out)
+
+### Mid-West
+mw_out <- lapply(mw, prep4typology, patterns = pats)
+mw_out_df <- do.call(rbind, mw_out)
+
+### US
+us_typ <- rbind(ne_out_df, s_out_df, w_out_df, mw_out_df)
+write.csv(us_typ, "Output Data/Typology/US_Typology_Variables_minPts100.csv")
+
 
 
