@@ -10,22 +10,18 @@ source("Source Code/Helper Functions - Typology.R")
 tempdir()
 dir.create(tempdir())
 
+## Read in the pattern
+pats <- fread("Output Data/Patterns/july_2021_patterns.csv")
+
 ## Test it 
 state_list <- c("DC")
-out_ls <- lapply(state_list, prep4typology)
+out_ls <- lapply(state_list, prep4typology, patterns = pats)
 
-## Rbind and write out
+exce## Rbind and write out
 out_df <- do.call(rbind, out_ls)
 write.csv(out_df, "Output Data/Typology/US_Typology_Variables_minPts100.csv")
 
+### Test on one state - for troubleshooting
+n <- prep4typology("MT", pats)
 
-### tEST ON ONE
-n <- prep4typology("DC")
 
-boundaries <- get_rc("DC")
-pts <- get_pts("DC")
-pts <- st_set_crs(pts, 4326)
-boundaries <- st_transform(boundaries, 4326)
-
-b <- boundaries[1, ]
-int <- st_intersection(b, pts)
