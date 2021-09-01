@@ -3,40 +3,92 @@
 library(sf)
 library(tidyverse)
 library(factoextra)
+library(FactoMineR)
 library(fpc)
 library(cluster)
+library(e1071)
+library(corrplot)
+library(RColorBrewer)
+library(lares)
 options(scipen=999)
 source("Source Code/Helper Functions - Typology.R")
 
-## Get typology variables for list of retail centres
-ne_typ <- lapply(ne, prep4typology)
-ne_typ_un <- do.call(rbind, ne_typ)
-st_write(ne_typ_un, "Output Data/Typology/NE_Typ.gpkg")
-
-
-### This is all done on a Linux machine - won't run on Windows (mclapply)
 
 # 1. Data Preparation -----------------------------------------------------
 
 ## Read in and prepare the dataset
-typ <- st_read("output_data/Typology/NE_Typ.gpkg")
+typ <- read.csv("Output Data/Typology/US_Typology_Variables_minPts50_NEW.csv")
+
+## Read in the centres
+rc <- st_read("Output Data/Retail Centres/US Retail Centres/US_RC_minPts50.gpkg")
 
 ## Variables in df
 typ_v <- typ %>%
-  as.data.frame() %>%
-  select(-c(geom)) %>%
+  select(-c(X)) %>%
   mutate_if(is.integer, as.numeric) %>%
   mutate_all(~replace(., is.na(.), 0))
 
-typ_s <- as.data.frame(scale(typ_v[, 3:33], center = TRUE, scale = TRUE))
+## Scale
+typ_s <- as.data.frame(scale(typ_v[, 2:38], center = TRUE, scale = TRUE))
+
+## Apply weights
+typ_s_w <- typ_s %>%
+  mutate(propClothingandFootwear = propClothingandFootwear * 0.017,
+         propDIYandHousehold = propDIYandHousehold * 0.017,
+         propRecreational = propRecreational * 0.017,
+         propFood = propFood * 0.017,
+         propCTNandGasoline = propCTNandGasoline * 0.017,
+         propOffLicence = propOffLicence * 0.017,
+         propChemist = propChemist * 0.017,
+         propBars = propBars * 0.017,
+         propRestaurant = propRestaurant * 0.017,
+         propFastFood = propFastFood * 0.017, 
+         propEntertainment = propEntertainment * 0.017,
+         propFitness = propFitness * 0.017,
+         propConsumerService = propConsumerService * 0.017, 
+         propHouseholdService = propHouseholdService * 0.017, 
+         propBusinessService = propBusinessService * 0.017,
+         
+         propIndependent = propIndependent * 0.063,
+         propSmallMultiple = propSmallMultiple * 0.063,
+         propPopularBrands = propPopularBrands * 0.063,
+         localCatDiversity = localCatDiversity * 0.063,
+         
+         nUnits = nUnits * 0.025,
+         roeckScore = roeckScore * 0.025,
+         distanceTravelled = distanceTravelled * 0.025,
+         retailDensity = retailDensity * 0.025,
+         residentialDensity = residentialDensity * 0.025,
+         employmentDensity = employmentDensity * 0.025,
+         retailemploymentDensity = retailemploymentDensity * 0.025,
+         roadDensity = roadDensity * 0.025,
+         propAnchor = propAnchor * 0.025,
+         propDiscount = propDiscount * 0.025,
+         
+         totalVisits = totalVisits * 0.125,
+         medianDwell = medianDwell * 0.125)
+
 
 # 2. Checking skew of variables -------------------------------------------
 
-skew <- as.data.frame(sapply(typ_s, function(x) skewness(x)))
+skew <- as.data.frame(sapply(typ_s_w, function(x) skewness(x)))
 skew <- skew %>%
   rownames_to_column("variable") %>%
   set_names(c("Variable", "Skew"))
-skew
+
+
+
+# 2.1 Descriptive Statistics ----------------------------------------------
+
+## Median vals
+median_vals <- typ_v %>%
+  summarise_if(is.numeric, median) %>%
+  gather()
+
+## Standard Deviations
+st_dev_vals <- typ_v %>%
+  summarise_if(is.numeric, sd) %>%
+  gather()
 
 # 3. Checking collinearity of variables -----------------------------------
 
@@ -46,34 +98,31 @@ cor_m <- cor(typ_s)
 ## Compute p vals
 p.mat <- cor.mtest(typ_s)
 
-## Plot - marking off insignificant correlations 
-corrplot::corrplot(cor_m, type = "upper", tl.srt = 45, method = "number",
-                   p.mat = p.mat, sig.level = 0.01, insig = "blank")
+## Plot - marking off insignificant correlations
+corrplot(cor_m, type = "upper", method = "color",
+         insig = "blank", tl.srt = 90, tl.col = "black", p.mat = p.mat$p,
+         col = brewer.pal(n = 8, name = "Greys"))
+
+## Extract top 10 most correlated variables
+corr_cross(typ_s, max_pvalue = 0.05, top = 10)
 
 ## Remove highly linear variables
-typ_s <- typ_s %>%
-  select(-c(n.hexes, n.bdgs, area, 
-            top_category_diversity, pct_Independent, Tot_Res_Count)) %>%
+typ_s_clean <- typ_s %>%
+  select(-c(nationalCatDiversity, propNationalChain, retailService)) %>%
   mutate_all(~replace(., is.na(.), 0))
-
-## Remake corrplot
-cor_m <- cor(typ_s)
-p.mat <- cor.mtest(typ_s)
-corrplot::corrplot(cor_m, type = "upper", tl.srt = 45, method = "number",
-                   p.mat = p.mat, sig.level = 0.01, insig = "blank")
 
 
 # 3. Dimensionality Reduction ---------------------------------------------
 
 ## Compute PCA
-pca <- PCA(typ_s, graph = FALSE)
+pca <- PCA(typ_s_clean, graph = FALSE)
 
 ## Examine eigenvalues
 eig.vals <- get_eigenvalue(pca)
 eig.vals
 
 ## Scree plot
-fviz_eig(pca, addlabels = TRUE)
+fviz_eig(pca, addlabels = TRUE, ncp = 15)
 
 ## Extract results for active variables
 var <- get_pca_var(pca)
@@ -81,85 +130,115 @@ var$contrib
 
 ## Extract and plot representation of variables - contrib to Dim 1 & 2
 ## least contributions from median dwell, convenience and median distance travelled
-fviz_cos2(pca, choice = "var", axes = 1:2)
+fviz_cos2(pca, choice = "var", axes = 1:5)
 
-## Plot for each Dim
-fviz_contrib(pca, choice = "var", axes = 1, top = 10)
-fviz_contrib(pca, choice = "var", axes = 2, top = 10)
-
-## Remove variables for simplicity - Geodemographics
-typ_s_no_geodemo <- typ_s %>%
-  select(-c(GroupA_NE_prop, GroupB_NE_prop, GroupC_NE_prop, GroupD_NE_prop,
-            GroupE_NE_prop, GroupF_NE_prop, GroupG_NE_prop, GroupH_NE_prop, 
-            GroupI_NE_prop, GroupJ_NE_prop))
-
-## Most significant geodemographics
-geodems <- typ_s %>%
-  select(GroupH_NE_prop, GroupE_NE_prop, GroupC_NE_prop, GroupB_NE_prop, GroupA_NE_prop)
+## Remove insignificant variables
+typ_p <- typ_s_clean %>%
+  select(-c(transitDistance))
+  
 
 # 4. Identifying K Value --------------------------------------------------
 
+## Weight the variables
+typ_p_w <- typ_p %>%
+  mutate(propClothingandFootwear = propClothingandFootwear * 0.019,
+         propDIYandHousehold = propDIYandHousehold * 0.019,
+         propElectrical = propElectrical * 0.019,
+         propRecreational = propRecreational * 0.019,
+         propFood = propFood * 0.019,
+         propOffLicence = propOffLicence * 0.019,
+         propCTNandGasoline = propCTNandGasoline * 0.019,
+         propChemist = propChemist * 0.019,
+         propBars = propBars * 0.019,
+         propRestaurant = propRestaurant * 0.019,
+         propFastFood = propFastFood * 0.019, 
+         propEntertainment = propEntertainment * 0.019,
+         propFitness = propFitness * 0.019,
+         propConsumerService = propConsumerService * 0.019, 
+         propHouseholdService = propHouseholdService * 0.019, 
+         propBusinessService = propBusinessService * 0.019
+         
+         propIndependent = propIndependent * 0.063,
+         propSmallMultiple = propSmallMultiple * 0.063,
+         propPopularBrands = propPopularBrands * 0.063,
+         localCatDiversity = localCatDiversity * 0.063,
+         
+         nUnits = nUnits * 0.028,
+         roeckScore = roeckScore * 0.028,
+         retailDensity = retailDensity * 0.028,
+         residentialDensity = residentialDensity * 0.028,
+         employmentDensity = employmentDensity * 0.028,
+         retailemploymentDensity = retailemploymentDensity * 0.028,
+         roadDensity = roadDensity * 0.028,
+         propAnchor = propAnchor * 0.028,
+         propDiscount = propDiscount * 0.028,
+         
+         totalVisits = totalVisits * 0.083,
+         medianDwell = medianDwell * 0.083,
+         lowIncome = lowIncome * 0.083)
+  
+
+
 ## Print average silhouette scores
-get_silhouette_scores(typ_s_no_geodemo)
+sil_scores <- get_silhouette_scores(typ_p_w)
+sil_scores
 
-## Plot the clustergram
-fviz_nbclust(typ_s_no_geodemo,  cluster::pam, method = "wss", k.max = 10) +
-  labs(subtitle = "Elbow Method")
+## Silhouette plot
+sil_plot <- fviz_nbclust(typ_p, pam, method="silhouette") +
+  theme_classic()
+sil_plot
 
+## Within sum of squares
+wss_plot <- fviz_nbclust(typ_p,  cluster::pam, method = "wss", k.max = 10) + 
+  theme_classic()
+wss_plot
+
+## Ecluster plot
+eclust<- eclust(typ_p, FUNcluster = "pam", k = 2, hc_metric = "euclidean")
+eclust
 
 # 5. Running Typology -----------------------------------------------------
 
 ## Run typology
-pm_2 <- run_typology(typ_s_no_geodemo, 2)
-pm_3 <- run_typology(typ_s_no_geodemo, 3)
+pm_2 <- run_typology(typ_p, 2)
+pm_3 <- run_typology(typ_p_w, 3)
+pm_4 <- run_typology(typ_p, 4)
+pm_5 <- run_typology(typ_p, 5)
 
 ## Plot medoids
 plot_medoids(pm_2)
 plot_medoids(pm_3)
+plot_medoids(pm_5)
 
 
 # 6. Extracting Results ---------------------------------------------------
 
 ## Extract cluster vals and attach rcID/rcName
 pm_out <- pm_3[[1]]
-pm_out <- cbind(typ[,1:2], pm_out)
-tidy <- pm_out %>% select(rcID, rcName, cluster) %>% dplyr::rename(group_id = cluster)
-#st_write(pm_out, "output_data/Typology/test.gpkg")
+pm_out <- as.data.frame(cbind(typ_v[,1], pm_out))
+tidy <- pm_out %>% 
+  select(1:2) %>%
+  setNames(c("rcID", "cluster"))
+
+rc_merge <- merge(rc, tidy, by = "rcID")
+st_write(rc_merge, "t3.gpkg")
 
 ## Save medoids
-group_medoids <- plot_medoids(pm_3)
+group_medoids <- plot_medoids(pm_2)
 group_medoids
 
 ## Reattach geodemographic variables
 groups <- cbind(pm_out, geodems)
 
-# 7. Extracting Nested Types (with geodemographics) ----------------------------------------------
-
-## Get number of distinct groups
-n <- c(unique(groups$cluster))
-
-## Apply typology functions across number of groups
-types <- lapply(n, function(x) get_nested_types(groups, cl = x, medoids = FALSE))
-types_un <- do.call(rbind, types)
-
-medoids <- lapply(n, function(x) get_nested_types(groups, cl = x, medoids = TRUE))
-medoids_un <- do.call(rbind, medoids)
-type_medoids <- plot_type_medoids(medoids_un)
-
-
-group_medoids
-type_medoids
-
-# 7.1 Extracting Nested Types (without geodemographics) -------------------
+# 7. Extracting Nested Types  ----------------------------------------------
 
 ## Get number of distinct groups
 n <- c(unique(pm_out$cluster))
 
-
 ## Apply typology functions across number of groups
+colnames(pm_out)[1] <- "rcID"
 types <- lapply(n, function(x) get_nested_types(pm_out, cl = x, medoids = FALSE))
 types_un <- do.call(rbind, types)
-
 
 ## Get medoids
 medoids <- lapply(n, function(x) get_nested_types(pm_out, cl = x, medoids = TRUE))
@@ -168,7 +247,11 @@ type_medoids <- plot_type_medoids(medoids_un)
 type_medoids
 
 # 8. Writing Out ----------------------------------------------------------
-st_write(types_un, "output_data/Typology/NE_RC_Typology.gpkg")
 
+rc_out <- rc %>%
+  select(rcID)
+rc_out <- merge(rc_out, types_un, by = "rcID")
+
+st_write(rc_out, "Output Data/Typology/US_RC_Typology.gpkg")
 
 
