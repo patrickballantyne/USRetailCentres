@@ -94,12 +94,12 @@ prep4typology <- function(state, patterns) {
   
   ## Read in the datasets we need for this
   boundaries <- get_rc(state)
-  pts <- get_pts(state = state)
+  #pts <- get_pts(state = state)
   bdgs <- st_read(paste0("Output Data/Buildings/", state, "_Retail_Buildings.gpkg"))
   
   ## Merge on the new aggregations
-  ldc <- read.csv("Output Data/SafeGraph_Places_Categories_LDC.csv", header = TRUE)
-  pts <- merge(pts, ldc, by = c("top_category", "sub_category"), all.x = TRUE)
+  #ldc <- read.csv("Output Data/SafeGraph_Places_Categories_LDC.csv", header = TRUE)
+  #pts <- merge(pts, ldc, by = c("top_category", "sub_category"), all.x = TRUE)
 
   ## Merge
   rc_grouped <- boundaries %>%
@@ -120,6 +120,7 @@ prep4typology <- function(state, patterns) {
   
   ## Calculate Area
   boundaries$area <- st_area(boundaries)
+  boundaries$area <- boundaries$area / 1000
   
   ## Calculate Retail Building Density
   densities <- merge(boundaries, bdg_count, by = "rcID", all.x = TRUE)
@@ -130,6 +131,10 @@ prep4typology <- function(state, patterns) {
     select(-c(n.bdgs)) %>%
     mutate_at(vars(area, bdg_density), as.numeric)
   rc_grouped <- merge(rc_grouped, densities, by = "rcID", all.x = TRUE)
+  fillIn <- rc_grouped %>%
+    rename(retailDensity = bdg_density) %>%
+    select(rcID, retailDensity)
+  return(fillIn)
   
   ## 2. Proportions different types of retail ##########################
   
@@ -604,17 +609,15 @@ get_nested_types <- function(groups, cl = 1, medoids = FALSE) {
   ## Filter to cluster
   groups <- groups %>%
     dplyr::filter(cluster == cl)
-  
-  ## Remove names/id's
   groups_df <- groups %>%
-    as.data.frame() %>%
-    select(-c(rcID, rcName, cluster, geom))
+    select(-c(rcID, cluster))
   
   ## Get the silhouette scores
   ss <- get_silhouette_scores(groups_df)
   
   ## Extract max
   ss_max <- ss[which.max(ss$avg_silhouette_score),]
+  ss_max$k <- gsub("k=", "", ss_max$k)
   
   ## Run typology
   pm <- run_typology(groups_df, k = ss_max$k)
@@ -629,7 +632,7 @@ get_nested_types <- function(groups, cl = 1, medoids = FALSE) {
   out <- cbind(groups, clustering)
   out <- out %>%
     dplyr::rename(group = cluster) %>%
-    select(rcID, rcName, group, type) %>%
+    select(rcID, group, type) %>%
     transform(typ_id = paste(group, type, sep = "."))
   
   

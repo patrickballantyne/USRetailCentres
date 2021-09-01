@@ -165,10 +165,10 @@ get_observed_patronage <- function(state = "AL") {
 }
 
 ## Get attractiveness score for a set of retail centres
-get_attractive <- function(state = "AL") {
+get_attractive <- function(rc, state = "AL") {
   
   ## Read in centres
-  rc <- get_rc(state = state)
+  #rc <- get_rc(state = state)
   rc_out <- rc %>% 
     as.data.frame() %>%
     select(rcID, rcName, N.pts)

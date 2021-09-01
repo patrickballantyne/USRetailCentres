@@ -6,6 +6,7 @@ library(tmap)
 library(hereR)
 library(DBI)
 library(SafeGraphR)
+library(duckdb)
 source("Source Code/Helper Functions - Catchments.R")
 options(connectionObserver = NULL)
 mydb <- dbConnect(duckdb::duckdb(), "Output Data/Patterns/Patterns.duckdb")
@@ -22,6 +23,9 @@ rc <- get_rc("NM")
 cbg <- st_read("Input Data/Census Block Groups/US_Census_Block_Groups.gpkg")
 cbg <- cbg %>%
   rename(Census_Block_Group = CBG_ID)
+
+
+obs <- get_observed_patronage("NM")
 
 # 1. Create an attractiveness indicator -----------------------------------
 
