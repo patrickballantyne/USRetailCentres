@@ -48,7 +48,10 @@ For improved performance - particularly in extracting optimal k values and perfo
 
 ## Part Three - The '*Who*'
 
-To demarcate catchments for the centres we build a calibrated Huff model, utilising the SafeGraph 'weekly patterns' data - we use the data in calibrating the *alpha* and *beta* parameters of the model, before fitting the model with attractiveness and distance as the input variables. 
+To demarcate catchments for the centres we build a calibrated Huff model, utilising the SafeGraph 'weekly patterns' data - we use the data in calibrating the *alpha* and *beta* parameters of the model by extracting observed patronage probabilities for census block groups from the visitor_home_cbg variable, before fitting the model with attractiveness and distance as below:
 
-This section of the paper is still a work in progress, but working functions can be found [HERE](https://github.com/patrickballantyne/USRetailCentres/blob/main/Analysis%20Code/Developing%20Catchment%20Methodology.R)
+- Attractiveness - size, diversity, total number of visits
+- Distance - road network distances computed using the hereR API.
+
+This section of the paper is still a work in progress, but working functions can be found [HERE](https://github.com/patrickballantyne/USRetailCentres/blob/main/Source%20Code/Helper%20Functions%20-%20Catchments.R)
 
