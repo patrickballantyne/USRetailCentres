@@ -25,48 +25,54 @@ rc <- st_read("Output Data/Retail Centres/US Retail Centres/US_RC_minPts50.gpkg"
 ## Variables in df
 typ_v <- typ %>%
   select(-c(X)) %>%
+  select(2:38) %>%
   mutate_if(is.integer, as.numeric) %>%
   mutate_all(~replace(., is.na(.), 0))
 
-## Scale
-typ_s <- as.data.frame(scale(typ_v[, 2:38], center = TRUE, scale = TRUE))
+## Scale to Z scores
+typ_z <- as.data.frame(scale(typ_v, center = TRUE, scale = TRUE))
 
-## Apply weights
-typ_s_w <- typ_s %>%
-  mutate(propClothingandFootwear = propClothingandFootwear * 0.017,
-         propDIYandHousehold = propDIYandHousehold * 0.017,
-         propRecreational = propRecreational * 0.017,
-         propFood = propFood * 0.017,
-         propCTNandGasoline = propCTNandGasoline * 0.017,
-         propOffLicence = propOffLicence * 0.017,
-         propChemist = propChemist * 0.017,
-         propBars = propBars * 0.017,
-         propRestaurant = propRestaurant * 0.017,
-         propFastFood = propFastFood * 0.017, 
-         propEntertainment = propEntertainment * 0.017,
-         propFitness = propFitness * 0.017,
-         propConsumerService = propConsumerService * 0.017, 
-         propHouseholdService = propHouseholdService * 0.017, 
-         propBusinessService = propBusinessService * 0.017,
-         
-         propIndependent = propIndependent * 0.063,
-         propSmallMultiple = propSmallMultiple * 0.063,
-         propPopularBrands = propPopularBrands * 0.063,
-         localCatDiversity = localCatDiversity * 0.063,
-         
-         nUnits = nUnits * 0.025,
-         roeckScore = roeckScore * 0.025,
-         distanceTravelled = distanceTravelled * 0.025,
-         retailDensity = retailDensity * 0.025,
-         residentialDensity = residentialDensity * 0.025,
-         employmentDensity = employmentDensity * 0.025,
-         retailemploymentDensity = retailemploymentDensity * 0.025,
-         roadDensity = roadDensity * 0.025,
-         propAnchor = propAnchor * 0.025,
-         propDiscount = propDiscount * 0.025,
-         
-         totalVisits = totalVisits * 0.125,
-         medianDwell = medianDwell * 0.125)
+## Scale to 0 - 1
+scale2 <- function(x) (scales::rescale(x, to = c(0 , 1)))
+typ_s <- typ_v %>% mutate_all(., scale2)
+
+
+# ## Apply weights
+# typ_s_w <- typ_s %>%
+#   mutate(propClothingandFootwear = propClothingandFootwear * 0.017,
+#          propDIYandHousehold = propDIYandHousehold * 0.017,
+#          propRecreational = propRecreational * 0.017,
+#          propFood = propFood * 0.017,
+#          propCTNandGasoline = propCTNandGasoline * 0.017,
+#          propOffLicence = propOffLicence * 0.017,
+#          propChemist = propChemist * 0.017,
+#          propBars = propBars * 0.017,
+#          propRestaurant = propRestaurant * 0.017,
+#          propFastFood = propFastFood * 0.017, 
+#          propEntertainment = propEntertainment * 0.017,
+#          propFitness = propFitness * 0.017,
+#          propConsumerService = propConsumerService * 0.017, 
+#          propHouseholdService = propHouseholdService * 0.017, 
+#          propBusinessService = propBusinessService * 0.017,
+#          
+#          propIndependent = propIndependent * 0.063,
+#          propSmallMultiple = propSmallMultiple * 0.063,
+#          propPopularBrands = propPopularBrands * 0.063,
+#          localCatDiversity = localCatDiversity * 0.063,
+#          
+#          nUnits = nUnits * 0.025,
+#          roeckScore = roeckScore * 0.025,
+#          distanceTravelled = distanceTravelled * 0.025,
+#          retailDensity = retailDensity * 0.025,
+#          residentialDensity = residentialDensity * 0.025,
+#          employmentDensity = employmentDensity * 0.025,
+#          retailemploymentDensity = retailemploymentDensity * 0.025,
+#          roadDensity = roadDensity * 0.025,
+#          propAnchor = propAnchor * 0.025,
+#          propDiscount = propDiscount * 0.025,
+#          
+#          totalVisits = totalVisits * 0.125,
+#          medianDwell = medianDwell * 0.125)
 
 
 # 2. Checking skew of variables -------------------------------------------
@@ -141,55 +147,55 @@ typ_p <- typ_s_clean %>%
 
 ## Weight the variables
 typ_p_w <- typ_p %>%
-  mutate(propClothingandFootwear = propClothingandFootwear * 0.019,
-         propDIYandHousehold = propDIYandHousehold * 0.019,
-         propElectrical = propElectrical * 0.019,
-         propRecreational = propRecreational * 0.019,
-         propFood = propFood * 0.019,
-         propOffLicence = propOffLicence * 0.019,
-         propCTNandGasoline = propCTNandGasoline * 0.019,
-         propChemist = propChemist * 0.019,
-         propBars = propBars * 0.019,
-         propRestaurant = propRestaurant * 0.019,
-         propFastFood = propFastFood * 0.019, 
-         propEntertainment = propEntertainment * 0.019,
-         propFitness = propFitness * 0.019,
-         propConsumerService = propConsumerService * 0.019, 
-         propHouseholdService = propHouseholdService * 0.019, 
-         propBusinessService = propBusinessService * 0.019
+  mutate(propClothingandFootwear = propClothingandFootwear * 0.016,
+         propDIYandHousehold = propDIYandHousehold * 0.016,
+         propElectrical = propElectrical * 0.016,
+         propRecreational = propRecreational * 0.016,
+         propFood = propFood * 0.016,
+         propOffLicence = propOffLicence * 0.016,
+         propCTNandGasoline = propCTNandGasoline * 0.016,
+         propChemist = propChemist * 0.016,
+         propBars = propBars * 0.016,
+         propRestaurant = propRestaurant * 0.016,
+         propFastFood = propFastFood * 0.016, 
+         propEntertainment = propEntertainment * 0.016,
+         propFitness = propFitness * 0.016,
+         propConsumerService = propConsumerService * 0.016, 
+         propHouseholdService = propHouseholdService * 0.016, 
+         propBusinessService = propBusinessService * 0.016,
          
          propIndependent = propIndependent * 0.063,
          propSmallMultiple = propSmallMultiple * 0.063,
          propPopularBrands = propPopularBrands * 0.063,
          localCatDiversity = localCatDiversity * 0.063,
          
-         nUnits = nUnits * 0.028,
-         roeckScore = roeckScore * 0.028,
-         retailDensity = retailDensity * 0.028,
-         residentialDensity = residentialDensity * 0.028,
-         employmentDensity = employmentDensity * 0.028,
-         retailemploymentDensity = retailemploymentDensity * 0.028,
-         roadDensity = roadDensity * 0.028,
-         propAnchor = propAnchor * 0.028,
-         propDiscount = propDiscount * 0.028,
+         nUnits = nUnits * 0.025,
+         roeckScore = roeckScore * 0.025,
+         retailDensity = retailDensity * 0.025,
+         distanceTravelled = distanceTravelled * 0.025,
+         residentialDensity = residentialDensity * 0.025,
+         employmentDensity = employmentDensity * 0.025,
+         retailemploymentDensity = retailemploymentDensity * 0.025,
+         roadDensity = roadDensity * 0.025,
+         propAnchor = propAnchor * 0.025,
+         propDiscount = propDiscount * 0.025,
          
          totalVisits = totalVisits * 0.083,
          medianDwell = medianDwell * 0.083,
          lowIncome = lowIncome * 0.083)
   
 
-
 ## Print average silhouette scores
 sil_scores <- get_silhouette_scores(typ_p_w)
 sil_scores
 
 ## Silhouette plot
-sil_plot <- fviz_nbclust(typ_p, pam, method="silhouette") +
+sil_plot <- fviz_nbclust(typ_p_w, pam, method="silhouette") +
   theme_classic()
 sil_plot
 
 ## Within sum of squares
-wss_plot <- fviz_nbclust(typ_p,  cluster::pam, method = "wss", k.max = 10) + 
+wss_plot <- fviz_nbclust(typ_p_w, cluster::pam, method = "wss", k.max = 10) + 
   theme_classic()
 wss_plot
 
