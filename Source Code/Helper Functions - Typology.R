@@ -354,6 +354,24 @@ prep4typology <- function(state, patterns) {
   rc_grouped <- rc_grouped %>%
     mutate_if(is.numeric, ~replace_na(., 0))
   
+  ## Compute proportion Premium Brands
+  premiumbrands <- read.csv("Output Data/Typology/PremiumBrands.csv")
+  present_premium <- pt_count %>%
+    as.data.frame() %>%
+    select(-c(geometry)) %>%
+    filter(brands %in% premiumbrands$brands) %>%
+    group_by(rcID) %>%
+    count() 
+  present_premiums <- merge(present_premium, rc_grouped[, c("rcID", "n.units")], all.x = TRUE)
+  present_premiums <- present_premiums %>%
+    mutate_if(is.numeric, ~replace_na(., 0)) %>%
+    mutate(propPremiumBrand = (n / n.units) * 100) %>%
+    select(rcID, propPremiumBrand) 
+  rc_grouped <- merge(rc_grouped, present_premiums, by = "rcID", all.x = TRUE)
+  rc_grouped <- rc_grouped %>%
+    mutate_if(is.numeric, ~replace_na(., 0))
+  
+  
   ## SmartLocation Variables 
   
   ### Read in the dataset
@@ -377,13 +395,31 @@ prep4typology <- function(state, patterns) {
   ## 6. Economic Performance ##########################
   
 
-  ### Low Income Population
-  sl_out2 <- sl_rc %>%
+  ## Download from tidycensus - median income & unemployment at census block group level
+  census_vars <- get_acs(geography = "block group",
+                  variables = c(unemployed = "B23025_005",
+                                medincome = "B19013_001"),
+                  state = state, 
+                  year = 2018)
+  census_vars_w <- census_vars %>%
+    select(GEOID, NAME, variable, estimate) %>%
+    spread(variable, estimate)
+  
+  cbg <- tigris::block_groups(state = state)
+  cbg <- cbg %>%
+    select(GEOID)
+  cbg_census <- merge(cbg, census_vars_w, by = "GEOID")
+  cbg_census <- st_transform(cbg_census, 4326)
+  
+  ## Extract those within RC and calculate median vals
+  join <- st_join(rc, cbg_census)
+  join <- join %>% 
     as.data.frame() %>%
+    select(rcID, medincome, unemployed) %>%
     group_by(rcID) %>%
-    summarise(Median_LowIncome_Prop = median(LowIncome)) %>%
-    select(rcID, Median_LowIncome_Prop)
-  rc_grouped <- merge(rc_grouped, sl_out2, by = "rcID", all.x = TRUE)
+    summarise(medianIncome = median(medincome),
+              medianUnemployed = median(unemployed))
+  rc_grouped <- merge(rc_grouped, join, by = "rcID", all.x = TRUE)
   
   ### Tenancy Mix 
   tenancy_mix <- pt_count %>%
