@@ -94,12 +94,12 @@ prep4typology <- function(state, patterns) {
   
   ## Read in the datasets we need for this
   boundaries <- get_rc(state)
-  #pts <- get_pts(state = state)
+  pts <- get_pts(state = state)
   bdgs <- st_read(paste0("Output Data/Buildings/", state, "_Retail_Buildings.gpkg"))
   
   ## Merge on the new aggregations
-  #ldc <- read.csv("Output Data/SafeGraph_Places_Categories_LDC.csv", header = TRUE)
-  #pts <- merge(pts, ldc, by = c("top_category", "sub_category"), all.x = TRUE)
+  ldc <- read.csv("Output Data/SafeGraph_Places_Categories_LDC.csv", header = TRUE)
+  pts <- merge(pts, ldc, by = c("top_category", "sub_category"), all.x = TRUE)
 
   ## Merge
   rc_grouped <- boundaries %>%
@@ -129,12 +129,9 @@ prep4typology <- function(state, patterns) {
     select(rcID, n.bdgs, area) %>%
     mutate(bdg_density = n.bdgs/area) %>%
     select(-c(n.bdgs)) %>%
-    mutate_at(vars(area, bdg_density), as.numeric)
+    mutate_at(vars(area, bdg_density), as.numeric) %>%
+    rename(retailDensity = bdg_density)
   rc_grouped <- merge(rc_grouped, densities, by = "rcID", all.x = TRUE)
-  fillIn <- rc_grouped %>%
-    rename(retailDensity = bdg_density) %>%
-    select(rcID, retailDensity)
-  return(fillIn)
   
   ## 2. Proportions different types of retail ##########################
   
@@ -397,7 +394,8 @@ prep4typology <- function(state, patterns) {
 
   ## Download from tidycensus - median income & unemployment at census block group level
   census_vars <- get_acs(geography = "block group",
-                  variables = c(unemployed = "B23025_005",
+                  variables = c(total = "B23025_001",
+                                unemployed = "B23025_005",
                                 medincome = "B19013_001"),
                   state = state, 
                   year = 2018)
@@ -412,14 +410,23 @@ prep4typology <- function(state, patterns) {
   cbg_census <- st_transform(cbg_census, 4326)
   
   ## Extract those within RC and calculate median vals
-  join <- st_join(rc, cbg_census)
-  join <- join %>% 
+  join <- st_join(boundaries, cbg_census)
+  
+  income <- join %>%
     as.data.frame() %>%
-    select(rcID, medincome, unemployed) %>%
+    select(rcID, medincome) %>%
     group_by(rcID) %>%
-    summarise(medianIncome = median(medincome),
-              medianUnemployed = median(unemployed))
-  rc_grouped <- merge(rc_grouped, join, by = "rcID", all.x = TRUE)
+    filter(!is.na(medincome)) %>%
+    summarise(medianIncome = median(medincome)) 
+  unemploy <- join %>%
+    as.data.frame() %>%
+    select(rcID, unemployed, total) %>%
+    filter(!is.na(unemployed)) %>%
+    mutate(propUnemployed = (unemployed/total) * 100) %>%
+    group_by(rcID) %>%
+    summarise(medianUnemployed = median(propUnemployed))
+  rc_grouped <- merge(rc_grouped, income, by = "rcID", all.x = TRUE)
+  rc_grouped <- merge(rc_grouped, unemploy, by = "rcID", all.x = TRUE)
   
   ### Tenancy Mix 
   tenancy_mix <- pt_count %>%
@@ -450,19 +457,28 @@ prep4typology <- function(state, patterns) {
   ## Join to main dataset
   pt_patterns <- merge(pt_count, patterns, by = "placekey", all.x = TRUE)
   
+  ## Remove non-retail
+  pt_patterns <- pt_patterns %>%
+    filter(ldc_aggregation != "MISC") %>%
+    filter(!is.na(ldc_aggregation))
+  
   
   ## Calculate variables
-  pat_vars <- pt_patterns %>%
+  visits <- pt_patterns %>%
     as.data.frame() %>%
     select(-c(geometry)) %>%
-    select(rcID, raw_visit_counts, median_dwell, distance_from_home) %>%
-    mutate_if(is.numeric, ~replace_na(., 0)) %>%
+    filter(!is.na(raw_visit_counts)) %>%
     group_by(rcID) %>%
-    summarise(totalVisits = sum(raw_visit_counts), medianDwell = median(median_dwell),
-              medianDistance = median(distance_from_home)) %>%
-    mutate_if(is.numeric, ~replace_na(., 0)) %>%
-    select(rcID, totalVisits, medianDwell, medianDistance)
-  rc_grouped <- merge(rc_grouped, pat_vars, by = "rcID", all.x = TRUE)  
+    summarise(totalVisits = sum(raw_visit_counts))
+  distance <- pt_patterns %>%
+    as.data.frame() %>%
+    select(-c(geometry)) %>%
+    filter(!is.na(distance_from_home)) %>%
+    group_by(rcID) %>%
+    summarise(medianDistance = median(distance_from_home)) %>%
+    mutate(medianDistance = medianDistance / 1000)
+  rc_grouped <- merge(rc_grouped, visits, by = "rcID", all.x = TRUE) 
+  rc_grouped <- merge(rc_grouped, distance, by = "rcID", all.x = TRUE)
   print("ECONOMIC PERFORMANCE VARIABLES EXTRACTED")
   
 
@@ -470,17 +486,20 @@ prep4typology <- function(state, patterns) {
 
   ## Tidying up 
   out_df <- rc_grouped %>%
-    rename(nUnits = n.units, roeckScore = roeck, distanceTravelled = medianDistance, residentialDensity = Median_Res_Density, employmentDensity = Median_Emp_Density, 
-           retailemploymentDensity = Median_Retail_Emp_Density, roadDensity = Median_Road_Density, transitDistance = Median_Distance_to_Transit,
-           lowIncome = Median_LowIncome_Prop, retailService = RetailtoService) %>%
+    rename(nUnits = n.units, roeckScore = roeck,  residentialDensity = Median_Res_Density, employmentDensity = Median_Emp_Density, 
+           retailemploymentDensity = Median_Retail_Emp_Density, roadDensity = Median_Road_Density, transitDistance = Median_Distance_to_Transit, retailService = RetailtoService) %>%
     select(rcID, 
            propClothingandFootwear, propDIYandHousehold, propElectrical, propRecreational,
            propChemist, propCTNandGasoline, propFood, propOffLicence,
            propBars, propRestaurant, propFastFood, propEntertainment, propFitness,
            propConsumerService, propHouseholdService, propBusinessService,
            propIndependent, propSmallMultiple, propNationalChain, propPopularBrands, nationalCatDiversity, localCatDiversity,
-           nUnits, roeckScore, distanceTravelled, residentialDensity, employmentDensity, retailemploymentDensity, roadDensity, transitDistance, propDiscount, propAnchor,
-           lowIncome, retailService, totalVisits, medianDwell)
+           nUnits, roeckScore, medianDistance, retailDensity, residentialDensity, retailemploymentDensity, roadDensity, propAnchor, propDiscount, propPremiumBrand,
+           totalVisits, medianUnemployed, medianIncome, retailService) %>%
+    mutate(totalVisits = replace_na(totalVisits, 0),
+           medianDistance = replace_na(medianDistance, 0),
+           medianUnemployed = replace_na(medianUnemployed, 0),
+           medianIncome = replace_na(medianIncome, 0))
   print(paste0(state, "", "Variables Extracted"))
   return(out_df)
   
