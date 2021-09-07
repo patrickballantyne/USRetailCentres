@@ -13,6 +13,12 @@ dir.create(tempdir())
 ## Read in the patterns
 pats <- fread("Output Data/Patterns/july_2021_patterns.csv")
 
+typ <- prep4typology("NV", pats)
+rc <- get_rc("NV")
+rc <- rc %>%
+  select(rcID, rcName)
+rc_typ <- merge(rc, typ, by = "rcID")
+st_write(rc_typ, "rc_typ.gpkg")
 ## Get variables
 
 ### North-East
