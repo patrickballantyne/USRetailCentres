@@ -1,22 +1,42 @@
 ## Function for pulling in the patterns for a state
-get_patterns <- function(state = "AL", duckdb = mydb, week = "july2021") {
-  
-  ## Read in the patterns from the duck database
-  ptns <- dbGetQuery(mydb, paste0("SELECT * FROM", " ", week, " ", " WHERE region = '", state, "'"))
-  print("PATTERNS EXTRACTED")
-  
-  ## Read in the points to match 
-  pts_query <- paste0("select* from SafeGraph_Cleaned_Places_US where region = '", state, "'") 
-  pts <- st_read("Output Data/SafeGraph_Cleaned_Places_US.gpkg", query = pts_query)
-  pts <- pts %>% select(placekey)
-  print("POINTS EXTRACTED")
-  
-  ## Merge
-  ptns_sf <- merge(pts, ptns, by = "placekey", all.x = TRUE)
-  print(paste0(week, "PATTERNS CLEANED"))
-  return(ptns_sf)
-}
+# get_patterns <- function(state = "AL", duckdb = mydb, week = "july2021") {
+#   
+#   ## Read in the patterns from the duck database
+#   ptns <- dbGetQuery(mydb, paste0("SELECT * FROM", " ", week, " ", " WHERE region = '", state, "'"))
+#   print("PATTERNS EXTRACTED")
+#   
+#   ## Read in the points to match 
+#   pts_query <- paste0("select* from SafeGraph_Cleaned_Places_US where region = '", state, "'") 
+#   pts <- st_read("Output Data/SafeGraph_Cleaned_Places_US.gpkg", query = pts_query)
+#   pts <- pts %>% select(placekey)
+#   print("POINTS EXTRACTED")
+#   
+#   ## Merge
+#   ptns_sf <- merge(pts, ptns, by = "placekey", all.x = TRUE)
+#   print(paste0(week, "PATTERNS CLEANED"))
+#   return(ptns_sf)
+# }
 
+## State to Region Lookup
+ne <- c("CT", "ME", "MA", "NH", "NJ", "NY", "PA", "RI", "VT")
+mw <- c("IL", "IN", "MI", "OH", "WI", "IA", "KS", "MN", "MO", "NE", "ND", "SD")
+s <- c("DE", "FL", "GA", "MD", "NC", "SC", "VA", "DC", "WV",
+       "AL", "KY", "MS", "TN",
+       "AR", "LA", "OK", "TX")
+w <- c("AZ", "CO", "ID", "MT", "NV", "NM", "UT", "WY",
+       "AK", "CA", "HI", "OR", "WA")
+
+
+## Function for reading in the patterns
+get_patterns <- function(iteration = "May2021") {
+  
+  ## Read in
+  ptn <- vroom(paste0("Output Data/Catchments/Patterns/", iteration, ".tsv"))
+  ptn <- ptn %>%
+    select(placekey, region, raw_visit_counts, visitor_home_cbgs, visitor_home_aggregation) %>%
+    rename(state = region)
+  return(ptn)
+}
 ## Get retail centres
 get_rc <- function(state = "AL") {
   
@@ -61,11 +81,11 @@ get_predicted_patronage <- function(state = "AL") {
 get_observed_patronage <- function(state = "AL") {
   
   ## Pull in patterns for state
-  ptns <- get_patterns(state = state, mydb, week = "july2021")
+  ptns <- vroom("Output Data/Catchments/Patterns/May2021.tsv")
   ptns <- ptns %>%
+    filter(region == state) %>%
     as.data.frame() %>%
-    select(placekey, raw_visit_counts, visitor_home_cbgs) %>%
-    mutate_all(na_if, "") 
+    mutate_all(na_if, "")
   
   ## Clean out the information about census block groups
   poi_home_cbgs <- expand_cat_json(ptns,
@@ -75,7 +95,9 @@ get_observed_patronage <- function(state = "AL") {
   
   ## Pull in list of intersecting places w/ retail centres
   rc <- get_rc(state = state) 
-  rc <- rc %>% select(rcID)
+  rc <- rc %>% 
+    select(rcID) %>%
+    st_transform(4326)
   
   pts <- get_pts(state = state)
   pts <- pts %>%
@@ -85,82 +107,38 @@ get_observed_patronage <- function(state = "AL") {
   int <- st_intersection(pts, rc)
   int <- int %>%
     as.data.frame() %>%
-    select(placekey)
+    select(placekey, rcID)
   
   ## Merge intersection onto patterns
   ptn_out <- merge(poi_home_cbgs, int, by = "placekey", all.y = TRUE)
+  ptn_out <- ptn_out %>%
+    setNames(c("placekey", "census_block_group", "totalVisits", "rcID")) %>%
+    filter(!is.na(totalVisits))
   
   ## Compute totals per RC and RC/CBG
-  test_g <- ptn_out %>%
-    group_by(rcID, visitor_home_cbg) %>%
-    summarise(CBG_RC_visits = sum(visitor_home_cbgs)) %>%
-    setNames(c("rcID", "Census_Block_Group", "Total_Visits_RC"))
-  test_cbg <- ptn_out %>%
-    group_by(visitor_home_cbg) %>%
-    summarise(CBG_visits = sum(visitor_home_cbgs)) %>%
-    setNames(c("Census_Block_Group", "Total_Visits_CBG"))
+  rc_total <- ptn_out %>%
+    group_by(rcID, census_block_group) %>%
+    summarise(CBG_RC_visits = sum(totalVisits)) %>%
+    setNames(c("rcID", "census_block_group", "totalVisitsRC"))
+  cbg_total <- ptn_out %>%
+    group_by(census_block_group) %>%
+    summarise(CBG_visits = sum(totalVisits)) %>%
+    setNames(c("census_block_group", "totalVisitsCBG"))
   
   ## Merge onto the Census Blocks
   cbg <- st_read("Input Data/Census Block Groups/US_Census_Block_Groups.gpkg")
   cbg <- cbg %>%
     select(CBG_ID) %>%
-    rename(Census_Block_Group = CBG_ID)
+    rename(census_block_group = CBG_ID)
   
-  cbg_merge <- merge(cbg, test_g, by = "Census_Block_Group", all.x = TRUE)
-  cbg_merge <- merge(cbg_merge, test_cbg)
+  cbg_merge <- merge(cbg, rc_total, by = "census_block_group", all.x = TRUE)
+  cbg_merge <- merge(cbg_merge, cbg_total, by = "census_block_group", all.x = TRUE)
   cbg_merge <- cbg_merge %>%
-    select(Census_Block_Group, rcID, CBG_Visits, CBG_RC_Visits) %>%
-    mutate(Prop_Visits = (CBG_RC_Visits / CBG_Visits) * 100) %>%
-    select(Census_Block_Group, rcID, CBG_Visits, CBG_RC_Visits, Prop_Visits) %>%
+    select(census_block_group, rcID, totalVisitsRC, totalVisitsCBG) %>%
+    mutate(propVisits = (totalVisitsRC / totalVisitsCBG) * 100) %>%
+    select(census_block_group, rcID, totalVisitsRC, totalVisitsCBG, propVisits) %>%
     mutate_if(is.character, as.factor)
-  
-  # ## Merge on 
-  # cbg_merge <- merge(cbg, test_g, by = "Census_Block_Group", all.x = TRUE)
-  # cbg_merge <- merge(cbg_merge, test_cbg, by = "Census_Block_Group", all.x = TRUE)
-  # cbg_merge <- cbg_merge %>%
-  #   select(Census_Block_Group, rcID, Total_Visits_CBG, Total_Visits_RC) %>%
-  #   mutate(Prop_Visits_RC = (Total_Visits_RC / Total_Visits_CBG) * 100) %>%
-  #   select(Census_Block_Group, rcID, Total_Visits_CBG, Total_Visits_RC, Prop_Visits_RC) %>%
-  #   mutate_if(is.character, as.factor)
-  # 
-  # ## Merge onto census blocks
-  # cbg <- st_read("Input Data/Census Block Groups/US_Census_Block_Groups.gpkg")
-  # cbg <- cbg %>% rename(Census_Block_Group = CBG_ID) %>% st_transform(32616)
-  # cbg_ptn <- merge(cbg, ptn_out, by.x = "Census_Block_Group", by.y = "visitor_home_cbg", all.y = TRUE)
-  # 
-  # ## For each retail centre, identify only those blocks within the 50km radius
-  # rc <- rc %>% st_transform(32616)
-  # rc_ls <- split(rc, seq(nrow(rc)))
-  # main_blocks <- lapply(rc_ls, function(x) {
-  #   
-  #   ## Create a buffer for each retail centre (50km)
-  #   rc_buffer <- st_transform(st_buffer(x, 50000))
-  #   
-  #   ## Get blocks in the buffer
-  #   blocks_sub <- cbg_ptn[rc_buffer, op = st_within]
-  #   blocks_sub })
-  # main_blocks <- do.call(rbind, main_blocks)
-  #   
-  # ## Compute total visits by retail centre & census block group
-  # ptn_out_group <- main_blocks %>%
-  #   group_by(rcID, visitor_home_cbg) %>%
-  #   summarise(CBG_RC_visits = sum(visitor_home_cbgs)) %>%
-  #   setNames(c("rcID", "Census_Block_Group", "Total_Visits_RC"))
-  # ## Compute total visits by census block group
-  # ptn_out_cbg <- main_blocks %>%
-  #   group_by(visitor_home_cbg) %>%
-  #   summarise(CBG_visits = sum(visitor_home_cbgs)) %>%
-  #   setNames(c("Census_Block_Group", "Total_Visits_CBG"))
-  # 
-  # ## Merge counts 
-  # cbg_merge <- merge(cbg, ptn_out_group, by = "Census_Block_Group", all.x = TRUE)
-  # cbg_merge <- merge(cbg_merge, ptn_out_cbg, by = "Census_Block_Group", all.x = TRUE)
   return(cbg_merge)
-  
-  
-  
-  
-  
   
 }
 

@@ -4,29 +4,99 @@ library(sf)
 library(tidyverse)
 library(tmap)
 library(hereR)
-library(DBI)
+library(vroom)
 library(SafeGraphR)
-library(duckdb)
 source("Source Code/Helper Functions - Catchments.R")
-options(connectionObserver = NULL)
-mydb <- dbConnect(duckdb::duckdb(), "Output Data/Patterns/Patterns.duckdb")
-options(scipen = 999)
-tempdir()
-dir.create(tempdir())
 tmap_mode("view")
+options(scipen = 999)
 set_key("5zgYrNtYojJ0DPRRAnufXo_dLijIAav_a6-3j-bg768")
 
-## Read in the retail centres for a state
-rc <- get_rc("NM")
 
-## Pull in Census Block Groups
-cbg <- st_read("Input Data/Census Block Groups/US_Census_Block_Groups.gpkg")
-cbg <- cbg %>%
-  rename(Census_Block_Group = CBG_ID)
+# 1. Observed Patronage - SafeGraph 'weekly patterns' ---------------------
+
+## Pull in census blocks for calibration area
+w_tracts <- st_read("Output Data/Catchments/West_Tracts.gpkg")
+
+## Patterns
+july2021 <- get_patterns("July2021")
+
+## Extract and upack those for calibration area
+july2021_w <- july2021 %>%
+  filter(state %in% w)
+
+###### Compute by census tract ################################
+
+## Expand using SafeGraphR
+july2021_w <- expand_cat_json(july2021_w,
+                             expand = "visitor_home_aggregation",
+                             index = "CensusTract",
+                             by = c("placekey", "raw_visit_counts"))
+
+## Compute total visits to each census tract
+tract_total_visits <- july2021_w %>%
+  select(CensusTract, raw_visit_counts) %>%
+  group_by(CensusTract) %>%
+  summarise(TotalVisitsTract = sum(raw_visit_counts))
+
+## Compute total visitors from census tracts
+tract_total_visitors <- july2021_w %>%
+  select(CensusTract, visitor_home_aggregation) %>%
+  rename(totalVisits = visitor_home_aggregation) %>%
+  group_by(CensusTract) %>%
+  summarise(totalVisitorsTract = sum(totalVisits))
+
+## Join together to calculate average visits
+join <- merge(tract_total_visitors, tract_total_visits, by = "CensusTract")
+join$averageVisits <- join$TotalVisitsTract / join$totalVisitorsTract
+
+## Merge onto census block groups, and replace NAs
+out <- merge(w_tracts, join, by = "CensusTract", all.x = TRUE)
+out <- out %>% mutate(totalVisitsTract = replace_na(totalVisitsTract, 0))
 
 
-obs <- get_observed_patronage("NM")
+###### Now you need to compute by retail centre and census tract ################
 
+## Pull in retail centres for calibration zone
+rc <- st_read("Output Data/Retail Centres/US Retail Centres/US_RC_minPts50.gpkg")
+rc <- rc %>%
+  filter(State %in% w) %>%
+  select(rcID) %>%
+  st_transform(4326)
+
+## Read in the points for those states
+pts <- lapply(w, get_pts)
+pts <- do.call(rbind, pts)
+pts <- pts %>%
+  select(placekey) %>%
+  st_set_crs(4326)
+
+## Perform intersection
+int <- st_join(pts, rc)
+int <- int %>%
+  as.data.frame() %>%
+  select(placekey, rcID) %>%
+  filter(!is.na(rcID))
+
+## Merge on the census tract counts
+ptn_out <- merge(july2021_w, int, by = "placekey", all.y = TRUE)
+ptn_out <- ptn_out %>%
+  setNames(c("placekey", "CensusTract", "totalVisits", "totalVisitors", "rcID"))
+
+## Merge on the total census tract counts
+ptn_out_merge <- merge(ptn_out, tract_total_visits, by = "CensusTract", all.x = TRUE)
+ptn_out_merge <- ptn_out_merge %>% filter(!is.na(TotalVisitsTract))
+
+## Compute total visits to each retail centre from each tract
+rc_total <- ptn_out_merge %>%
+  group_by(rcID, CensusTract, TotalVisitsTract) %>%
+  summarise(totalVisitorsRC = sum(totalVisitors)) %>%
+  mutate(averageVisits = TotalVisitsTract / totalVisitorsRC)
+
+
+rc_sub <- rc_total %>%
+  filter(rcID == "02_020_RC_1")
+m <- merge(w_tracts, rc_sub, by = "CensusTract", all.x = TRUE)
+st_write(m, "m.gpkg")
 # 1. Create an attractiveness indicator -----------------------------------
 
 ### OUR ATTRACTIVENESS INDICATOR WILL BE COMPRISED OF THREE ELEMENTS - 
