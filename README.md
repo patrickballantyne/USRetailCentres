@@ -1,12 +1,12 @@
 # USRetailCentres
 
-## American Retail Centre Geographies: Centres, Characteristics and Catchments 
+## The *Who, What* and *Where* of American Retail Centre Geographies.
 
-This repo contains all the code used for the paper: "American Retail Centre Geographies: Centres, Characteristics and Catchments". In this paper, using data from SafeGraph we develop a comprehensive understanding of the geographies of American retail centres. The paper has three sections/aims:
+This repo contains all the code used for the paper: The *Who, What* and *Where* of American Retail Centre Geographies. In this paper, using data from SafeGraph we develop a comprehensive understanding of the geographies of American retail centres. The paper has three sections/aims:
 
-1. The '*where*' - Delineating the spatial extent of American retail centre agglomerations.
-2. The '*what*' - Developing a multidimensional American retail centre typology.
-3. The '*who*' - Building a calibrating Huff model to estimate retail centre catchments. 
+1. The '*Where*' - Delineating the spatial extent of American retail centre agglomerations.
+2. The '*What*' - Developing a multidimensional American retail centre typology.
+3. The '*Who*' - Building a calibrating Huff model to estimate retail centre catchments. 
 
 The most recent update on this project can be found in the slides used to present at the 2021 RGS-IBG Annual International Conference. The slides are available [HERE](https://github.com/patrickballantyne/USRetailCentres/blob/main/AAG_2021_Slides.pptx). 
 
