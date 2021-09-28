@@ -77,6 +77,96 @@ get_predicted_patronage <- function(state = "AL") {
   return(huff)
 }
 
+## Function that calculates observed patronage for each state's worth of retail 
+getObserved <- function(state = "AL") {
+  
+  ## Pull in retail centres for calibration zone
+  rc <- st_read("Output Data/Retail Centres/US Retail Centres/US_RC_minPts50.gpkg")
+  rc <- rc %>%
+    filter(State == state) %>%
+    st_transform(4326)
+  rc_ls <- split(rc, seq(nrow(rc)))
+  
+  ## Pull in the points
+  pts <- get_pts(state)
+  pts <- pts %>%
+    select(placekey) %>%
+    st_set_crs(4326)
+  
+  ## Pull in the patterns
+  july2021 <- get_patterns("July2021")
+  july2021 <- july2021 %>%
+    filter(state == state)
+  
+  ## Pull in the census block groups
+  w_tracts <- st_read("Output Data/Catchments/West_Tracts.gpkg")
+  
+  ## Get the intersections
+  calcObserved <- function(x) {
+    
+    ## Get points in retail centre
+    int <- st_join(x, pts)
+    int_clean <- int %>%
+      as.data.frame() %>%
+      select(placekey, rcID) %>%
+      filter(!is.na(rcID))
+    
+    ## Attach patterns
+    int_patterns <- merge(july2021, int_clean, by = "placekey", all.y = TRUE)
+    int_patterns <- int_patterns %>%
+      select(rcID, placekey, raw_visit_counts, visitor_home_aggregation) %>%
+      filter(visitor_home_aggregation != "{}") %>%
+      filter(visitor_home_aggregation != "")
+    
+    ## Expand patterns to census tracts
+    ptn_out <- expand_cat_json(int_patterns,
+                               expand = "visitor_home_aggregation",
+                               index = "CensusTract",
+                               by = c("rcID", "placekey", "raw_visit_counts"))
+    
+    ## Compute total visits for census tracts by retail centre
+    out_df <- ptn_out %>%
+      select(rcID, CensusTract, visitor_home_aggregation) %>%
+      group_by(rcID, CensusTract) %>%
+      summarise(totalVisitors = sum(visitor_home_aggregation)) %>%
+      ungroup()
+    
+    ## Tidy up
+    tract_merge <- merge(w_tracts, out_df, by = "CensusTract", all.x = TRUE)
+    tract_merge <- tract_merge %>%
+      mutate(totalVisitors = replace_na(totalVisitors, 0)) %>%
+      select(-c(rcID))
+    tract_merge$rcID <- x$rcID
+    tract_merge <- tract_merge %>%
+      mutate_if(is.character, as.factor)
+    return(tract_merge)
+  }
+  
+  ## Format out of lapply
+  out <- lapply(rc_ls, calcObserved)
+  out_out <- data.table::rbindlist(out, use.names = TRUE)
+  out_out <- st_as_sf(out_out)
+  
+  ## Read in the census tract visitors for western region
+  w_visitors <- st_read("Output Data/Catchments/Observed Patronage/W_Tract_Visitors.gpkg")
+  w_visitors <- w_visitors %>%
+    as.data.frame() %>%
+    select(CensusTract, totalVisitors) %>%
+    rename(totalTractVisitors = totalVisitors)
+  
+  ## Merge on and compute proportions
+  out_merge <- merge(out_out, w_visitors, by = "CensusTract", all.x = TRUE)
+  out_merge$state <- state
+  out_merge <- out_merge %>%
+    as.data.frame() %>%
+    mutate(propVisitors = (totalVisitors / totalTractVisitors) * 100) %>%
+    mutate(propVisitors = replace_na(propVisitors, 0)) %>%
+    select(CensusTract, rcID, state, totalVisitors, totalTractVisitors, propVisitors)
+  vroom_write(out_merge, paste0("Output Data/Catchments/Observed Patronage/", state, "_ObservedPatronage.tsv"))
+  print(paste0(state, " ", "Observed Patronage Extracted"))
+}
+
+
 ## Function that uses SafeGraph patterns to construct 'observed patronage' probabilities
 get_observed_patronage <- function(state = "AL") {
   
