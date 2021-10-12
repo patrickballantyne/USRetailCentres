@@ -6,9 +6,15 @@ This repo contains all the code used for the paper: The *Who, What* and *Where* 
 
 1. The '*Where*' - Delineating the spatial extent of American retail centre agglomerations.
 2. The '*What*' - Developing a multidimensional American retail centre typology.
-3. The '*Who*' - Building a calibrating Huff model to estimate retail centre catchments. 
+3. The '*Who*' - Building a calibrated Huff model to estimate retail centre catchments. 
 
 The most recent update on this project can be found in the slides used to present at the 2021 RGS-IBG Annual International Conference. The slides are available [HERE](https://github.com/patrickballantyne/USRetailCentres/blob/main/AAG_2021_Slides.pptx). 
+
+---
+
+### Winner of the 2021 Robin Flowerdew Prize
+
+This paper was selected as the 2021 winner of the 'Robin Flowerdew Prize for Best Postgraduate Paper' at the RGS-IBG International Annual Conference. Check out the blog post about the award and paper [HERE](https://qmrg.github.io/blog/2021/10/12/Ballantyne-bio).
 
 ---
 
@@ -48,10 +54,10 @@ For improved performance - particularly in extracting optimal k values and perfo
 
 ## Part Three - The '*Who*'
 
-To demarcate catchments for the centres we build a calibrated Huff model, utilising the SafeGraph 'weekly patterns' data - we use the data in calibrating the *alpha* and *beta* parameters of the model by extracting observed patronage probabilities for census block groups from the visitor_home_cbg variable, before fitting the model with attractiveness and distance as below:
+To extract catchments for the centres we build a calibrated Huff model, utilising the SafeGraph 'weekly patterns' data. The model predicts patronage from census tracts to retail centres, accounting for attractiveness and distance (as below), and the model parameters - *alpha* and *beta* - are calibrated by comparing a series of Huff models against 'observed' probabilities obtained from the 'weekly patterns' data. 
 
 - Attractiveness - size, diversity, total number of visits
 - Distance - road network distances computed using the hereR API.
 
-This section of the paper is still a work in progress, but working functions can be found [HERE](https://github.com/patrickballantyne/USRetailCentres/blob/main/Source%20Code/Helper%20Functions%20-%20Catchments.R)
+For improved performance, the majority of the functions have been converted to work in parallel and are available [HERE](https://github.com/patrickballantyne/USRetailCentres/blob/main/Source%20Code/Helper%20Functions%20-%20Catchments%20(Parallel).R).
 
