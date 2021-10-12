@@ -15,7 +15,7 @@ This repo contains all the code used for the paper: The *Who, What* and *Where* 
 
 This paper was selected as the 2021 winner of the 'Robin Flowerdew Prize for Best Postgraduate Paper' at the RGS-IBG International Annual Conference. Check out the blog post about the award and paper [HERE](https://qmrg.github.io/blog/2021/10/12/Ballantyne-bio).
 
-Slides from the presentation are available to download [HERE](https://github.com/patrickballantyne/USRetailCentres/blob/main/AAG_2021_Slides.pptx). 
+Slides from the presentation are available to download [HERE](https://github.com/patrickballantyne/USRetailCentres/blob/main/RGS_2021_Slides.pptx). 
 
 ---
 
