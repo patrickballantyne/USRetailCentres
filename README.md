@@ -17,6 +17,8 @@ This paper was selected as the 2021 winner of the 'Robin Flowerdew Prize for Bes
 
 Slides from the presentation are available to download [HERE](https://github.com/patrickballantyne/USRetailCentres/blob/main/RGS_2021_Slides.pptx). 
 
+For those registered at the conference, you can watch the session 'The future of quantitative geography (1)' [HERE](https://event.ac2021.exordo.com/session/126/conf1137-the-future-of-quantitative-geography-critical-engagements-conceptual-borders-1).
+
 ---
 
 ### Part One - The '*Where*'
