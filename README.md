@@ -1,8 +1,8 @@
 # USRetailCentres
 
-## The *Who, What* and *Where* of American Retail Centre Geographies.
+## Integrating the *Who, What* and *Where* of American Retail Centre Geographies.
 
-This repo contains all the code used for the paper: The *Who, What* and *Where* of American Retail Centre Geographies. In this paper, using data from SafeGraph we develop a comprehensive understanding of the geographies of American retail centres. The paper has three sections/aims:
+This repo contains all the code used for the paper: Integrating the *Who, What* and *Where* of American Retail Centre Geographies. In this paper, using data from SafeGraph we develop a comprehensive understanding of the geographies of American retail centres. The paper has three sections/aims:
 
 1. The '*Where*' - Delineating the spatial extent of American retail centre agglomerations.
 2. The '*What*' - Developing a multidimensional American retail centre typology.
